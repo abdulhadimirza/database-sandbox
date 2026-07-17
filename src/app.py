@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage
@@ -28,7 +29,7 @@ def stream_gemini_response(chat_history):
 
     try:
         # Initialize the Gemini model
-        llm = ChatGoogleGenerativeAI(model="gemini-flash-lite-latest")
+        llm = ChatGoogleGenerativeAI(model=os.environ["MODEL"])
         for chunk in llm.stream(formatted_messages):
             for part in chunk.content:
                 yield part["text"]
