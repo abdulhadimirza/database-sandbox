@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "debugging-streamlit": {
+      "source": "streamlit/streamlit",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/debugging-streamlit/SKILL.md",
+      "computedHash": "0dc44e0fbc557ea8eba6a81a498102c0979734d4309f4e4e225a58ae9c5641c0"
+    },
     "langgraph-docs": {
       "source": "langchain-ai/deepagents",
       "sourceType": "github",

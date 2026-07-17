@@ -1,3 +1,5 @@
+*.db
+
 .streamlit/secrets.toml
 .streamlit/config.toml
 .streamlit/runtime/
