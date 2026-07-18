@@ -1,16 +1,46 @@
 import uuid
 import json
-from typing import Iterator, Dict, Any, List
+from typing import Iterator, Dict, Any, List, TypedDict, Union, Literal, Optional
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMessageChunk
+from langgraph.graph.state import CompiledStateGraph
+
+class HistoryUserMessage(TypedDict):
+    role: Literal["user"]
+    content: str
+
+class HistoryAssistantMessage(TypedDict):
+    role: Literal["assistant"]
+    content: str
+
+class HistoryToolMessage(TypedDict):
+    role: Literal["tool"]
+    name: str
+    args: Dict[str, Any]
+    result: str
+
+HistoryMessage = Union[HistoryUserMessage, HistoryAssistantMessage, HistoryToolMessage]
+
+class StreamContentEvent(TypedDict):
+    type: Literal["content"]
+    content: str
+
+class StreamToolEvent(TypedDict):
+    type: Literal["tool"]
+    name: str
+    args: Dict[str, Any]
+    result: str
+    id: str
+
+StreamEvent = Union[StreamContentEvent, StreamToolEvent]
 
 class ChatSession:
-    def __init__(self, agent, thread_id: str = None):
+    def __init__(self, agent: CompiledStateGraph, thread_id: Optional[str] = None):
         self.agent = agent
         self.thread_id = thread_id or str(uuid.uuid4())
         self.config = {"configurable": {"thread_id": self.thread_id}}
 
-    def get_history(self) -> List[Dict[str, Any]]:
+    def get_history(self) -> List[HistoryMessage]:
         state = self.agent.get_state(self.config)
         messages = state.values.get("messages", []) if state and hasattr(state, 'values') and state.values else []
         
@@ -54,7 +84,7 @@ class ChatSession:
                 
         return history
 
-    def send_message(self, prompt: str) -> Iterator[Dict[str, Any]]:
+    def send_message(self, prompt: str) -> Iterator[StreamEvent]:
         input_state = {"messages": [HumanMessage(content=prompt)]}
         active_tool_calls = {}
 

@@ -1,4 +1,3 @@
-import os
 import json
 import typer
 from rich.console import Console
@@ -41,16 +40,15 @@ def main():
     if history:
         console.print("[dim]Restoring previous session...[/dim]")
         for msg in history:
-            role = msg.get("role")
-            if role == "user":
-                console.print(f"[bold green]You:[/bold green] {msg.get('content')}")
-            elif role == "assistant":
+            if msg["role"] == "user":
+                console.print(f"[bold green]You:[/bold green] {msg['content']}")
+            elif msg["role"] == "assistant":
                 content = msg.get("content")
                 if content:
                     console.print("\n[bold blue]Assistant:[/bold blue]")
                     console.print(Markdown(content))
-            elif role == "tool":
-                render_tool_call(console, msg.get('name'), msg.get('args', {}), msg.get('result'))
+            elif msg["role"] == "tool":
+                render_tool_call(console, msg['name'], msg['args'], msg['result'])
                 
     while True:
         try:
@@ -81,7 +79,7 @@ def main():
                             live.update("")
                         live.stop()
                         
-                        render_tool_call(console, event.get('name'), event.get('args'), event.get('result'))
+                        render_tool_call(console, event['name'], event['args'], event['result'])
                         
                         full_response = ""
                         live = Live(console=console, refresh_per_second=10)
