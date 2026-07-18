@@ -1,5 +1,5 @@
 import os
-from typing import Annotated, List, Optional
+import time
 from typing import Annotated, List, Optional
 from pydantic import BaseModel
 from langchain_core.messages import AnyMessage, SystemMessage
@@ -78,11 +78,20 @@ def describe_table(table_name: str) -> str:
     except Exception as e:
         return f"Error describing table '{table_name}': {e}"
 
+def create_timeout_handler(timeout_seconds: float):
+    start_time = time.time()
+    def progress_handler() -> int:
+        if time.time() - start_time > timeout_seconds:
+            return 1 # Return non-zero to abort query
+        return 0
+    return progress_handler
+
 @tool
 def execute_read_query(query: str) -> str:
     """Safely execute a raw SQL query provided by the LLM and return the results."""
     try:
         with get_readonly_connection() as conn:
+            conn.set_progress_handler(create_timeout_handler(2.0), 1000)
             cursor = conn.cursor()
             
             cursor.execute(query)

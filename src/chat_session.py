@@ -2,8 +2,10 @@ import uuid
 import json
 from typing import Iterator, Dict, Any, List, TypedDict, Union, Literal, Optional
 
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMessageChunk
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMessageChunk, SystemMessage
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.errors import GraphRecursionError
+from langchain_core.runnables import RunnableConfig
 
 class HistoryUserMessage(TypedDict):
     role: Literal["user"]
@@ -38,7 +40,7 @@ class ChatSession:
     def __init__(self, agent: CompiledStateGraph, thread_id: Optional[str] = None):
         self.agent = agent
         self.thread_id = thread_id or str(uuid.uuid4())
-        self.config = {"configurable": {"thread_id": self.thread_id}}
+        self.config: RunnableConfig = {"configurable": {"thread_id": self.thread_id}, "recursion_limit": 10}
 
     def get_history(self) -> List[HistoryMessage]:
         state = self.agent.get_state(self.config)
@@ -88,67 +90,72 @@ class ChatSession:
         input_state = {"messages": [HumanMessage(content=prompt)]}
         active_tool_calls = {}
 
-        for chunk in self.agent.stream(input_state, self.config, stream_mode="messages", version="v2"):
-            if chunk["type"] == "messages":
-                msg, metadata = chunk["data"]
-
-                if isinstance(msg, (AIMessage, AIMessageChunk)):
-                    if msg.content:
-                        content_str = ""
-                        if isinstance(msg.content, str):
-                            content_str = msg.content
-                        elif isinstance(msg.content, list):
-                            for block in msg.content:
-                                if isinstance(block, dict) and block.get("type") == "text" and "text" in block:
-                                    content_str += block["text"]
-                        
-                        if content_str:
-                            yield {"type": "content", "content": content_str}
-
-                    if hasattr(msg, "tool_call_chunks") and msg.tool_call_chunks:
-                        for tc in msg.tool_call_chunks:
-                            idx = tc.get("index")
-                            if idx not in active_tool_calls:
-                                active_tool_calls[idx] = {
-                                    "name": tc.get("name") or "", 
-                                    "args": "", 
-                                    "id": tc.get("id") or ""
-                                }
-                            if tc.get("name"):
-                                active_tool_calls[idx]["name"] = tc["name"]
-                            if tc.get("id"):
-                                active_tool_calls[idx]["id"] = tc["id"]
-                            if tc.get("args"):
-                                active_tool_calls[idx]["args"] += tc["args"]
-                    elif hasattr(msg, "tool_calls") and msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            idx = tc.get("id")
-                            if idx not in active_tool_calls:
-                                active_tool_calls[idx] = {
-                                    "name": tc.get("name") or "",
-                                    "args": json.dumps(tc.get("args") or {}),
-                                    "id": tc.get("id") or ""
-                                }
-
-                elif isinstance(msg, ToolMessage):
-                    # Find matching tool call to pass arguments
-                    tc_args = "{}"
-                    for tc_key, tc in list(active_tool_calls.items()):
-                        if tc["id"] == getattr(msg, "tool_call_id", ""):
-                            tc_args = tc["args"]
+        try:
+            for chunk in self.agent.stream(input_state, self.config, stream_mode="messages", version="v2"):
+                if chunk["type"] == "messages":
+                    msg, metadata = chunk["data"]
+    
+                    if isinstance(msg, (AIMessage, AIMessageChunk)):
+                        if msg.content:
+                            content_str = ""
+                            if isinstance(msg.content, str):
+                                content_str = msg.content
+                            elif isinstance(msg.content, list):
+                                for block in msg.content:
+                                    if isinstance(block, dict) and block.get("type") == "text" and "text" in block:
+                                        content_str += block["text"]
                             
-                            # Delete the specific key from the dictionary
-                            del active_tool_calls[tc_key]
-                            break
-                    
-                    try:
-                        parsed_args = json.loads(tc_args) if tc_args else {}
-                    except json.JSONDecodeError:
-                        parsed_args = {"_raw": tc_args}
+                            if content_str:
+                                yield {"type": "content", "content": content_str}
+    
+                        if hasattr(msg, "tool_call_chunks") and msg.tool_call_chunks:
+                            for tc in msg.tool_call_chunks:
+                                idx = tc.get("index")
+                                if idx not in active_tool_calls:
+                                    active_tool_calls[idx] = {
+                                        "name": tc.get("name") or "", 
+                                        "args": "", 
+                                        "id": tc.get("id") or ""
+                                    }
+                                if tc.get("name"):
+                                    active_tool_calls[idx]["name"] = tc["name"]
+                                if tc.get("id"):
+                                    active_tool_calls[idx]["id"] = tc["id"]
+                                if tc.get("args"):
+                                    active_tool_calls[idx]["args"] += tc["args"]
+                        elif hasattr(msg, "tool_calls") and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                idx = tc.get("id")
+                                if idx not in active_tool_calls:
+                                    active_tool_calls[idx] = {
+                                        "name": tc.get("name") or "",
+                                        "args": json.dumps(tc.get("args") or {}),
+                                        "id": tc.get("id") or ""
+                                    }
+    
+                    elif isinstance(msg, ToolMessage):
+                        # Find matching tool call to pass arguments
+                        tc_args = "{}"
+                        for tc_key, tc in list(active_tool_calls.items()):
+                            if tc["id"] == getattr(msg, "tool_call_id", ""):
+                                tc_args = tc["args"]
+                                
+                                # Delete the specific key from the dictionary
+                                del active_tool_calls[tc_key]
+                                break
                         
-                    yield {
-                        "type": "tool",
-                        "name": msg.name,
-                        "args": parsed_args,
-                        "result": msg.content,
-                    }
+                        try:
+                            parsed_args = json.loads(tc_args) if tc_args else {}
+                        except json.JSONDecodeError:
+                            parsed_args = {"_raw": tc_args}
+                            
+                        yield {
+                            "type": "tool",
+                            "name": msg.name,
+                            "args": parsed_args,
+                            "result": msg.content,
+                        }
+        except GraphRecursionError:
+            error_msg = "Agent reached its recursion limit (too many steps) and was stopped. Please adjust your approach."
+            self.agent.update_state(self.config, {"messages": [SystemMessage(content=error_msg)]})
+            yield {"type": "content", "content": f"\n\n**Error:** {error_msg}"}
