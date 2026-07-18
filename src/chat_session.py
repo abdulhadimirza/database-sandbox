@@ -15,6 +15,8 @@ class ChatSession:
         messages = state.values.get("messages", []) if state and hasattr(state, 'values') and state.values else []
         
         history = []
+        pending_tool_calls = {}
+
         for msg in messages:
             if isinstance(msg, HumanMessage):
                 history.append({"role": "user", "content": msg.content})
@@ -28,26 +30,26 @@ class ChatSession:
                             if isinstance(block, dict) and block.get("type") == "text" and "text" in block:
                                 content_str += block["text"]
                 
-                tool_calls = []
+                if content_str:
+                    history.append({
+                        "role": "assistant",
+                        "content": content_str
+                    })
+
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
                     for tc in msg.tool_calls:
-                        tool_calls.append({
-                            "name": tc.get('name', ''),
-                            "args": tc.get('args', {}),
-                            "id": tc.get('id', '')
-                        })
-                
-                history.append({
-                    "role": "assistant",
-                    "content": content_str,
-                    "tool_calls": tool_calls
-                })
+                        pending_tool_calls[tc.get('id', '')] = tc
+                        
             elif isinstance(msg, ToolMessage):
+                tc_id = getattr(msg, "tool_call_id", "")
+                tc = pending_tool_calls.get(tc_id, {})
+                tc_args = tc.get("args", {})
+                
                 history.append({
                     "role": "tool", 
                     "name": msg.name,
-                    "result": msg.content,
-                    "id": getattr(msg, "tool_call_id", "")
+                    "args": tc_args,
+                    "result": msg.content
                 })
                 
         return history
@@ -71,7 +73,7 @@ class ChatSession:
                                     content_str += block["text"]
                         
                         if content_str:
-                            yield {"type": "content_chunk", "data": content_str}
+                            yield {"type": "content", "content": content_str}
 
                     if hasattr(msg, "tool_call_chunks") and msg.tool_call_chunks:
                         for tc in msg.tool_call_chunks:
@@ -91,13 +93,12 @@ class ChatSession:
                     
                     try:
                         parsed_args = json.loads(tc_args) if tc_args else {}
-                        args_str = json.dumps(parsed_args, indent=2)
                     except json.JSONDecodeError:
-                        args_str = tc_args
+                        parsed_args = {"_raw": tc_args}
                         
                     yield {
-                        "type": "tool_execution",
+                        "type": "tool",
                         "name": msg.name,
-                        "args": args_str,
-                        "result": msg.content
+                        "args": parsed_args,
+                        "result": msg.content,
                     }
