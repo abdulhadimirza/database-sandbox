@@ -2,6 +2,7 @@ import sqlite3
 import os
 from typing import Generator
 from contextlib import contextmanager
+import urllib.request
 
 # The database file will be stored in the root directory
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sandbox.db")
@@ -13,6 +14,20 @@ def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
     """
     conn = sqlite3.connect(DB_PATH)
     # Return rows as dictionary-like objects instead of tuples
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+@contextmanager
+def get_readonly_connection() -> Generator[sqlite3.Connection, None, None]:
+    """
+    Context manager to yield a read-only database connection.
+    """
+    safe_path = urllib.request.pathname2url(DB_PATH)
+    uri = f"file:{safe_path}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
