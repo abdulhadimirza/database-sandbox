@@ -109,16 +109,36 @@ class ChatSession:
                         for tc in msg.tool_call_chunks:
                             idx = tc.get("index")
                             if idx not in active_tool_calls:
-                                active_tool_calls[idx] = {"name": tc.get("name", ""), "args": "", "id": tc.get("id", "")}
+                                active_tool_calls[idx] = {
+                                    "name": tc.get("name") or "", 
+                                    "args": "", 
+                                    "id": tc.get("id") or ""
+                                }
+                            if tc.get("name"):
+                                active_tool_calls[idx]["name"] = tc["name"]
+                            if tc.get("id"):
+                                active_tool_calls[idx]["id"] = tc["id"]
                             if tc.get("args"):
                                 active_tool_calls[idx]["args"] += tc["args"]
+                    elif hasattr(msg, "tool_calls") and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            idx = tc.get("id")
+                            if idx not in active_tool_calls:
+                                active_tool_calls[idx] = {
+                                    "name": tc.get("name") or "",
+                                    "args": json.dumps(tc.get("args") or {}),
+                                    "id": tc.get("id") or ""
+                                }
 
                 elif isinstance(msg, ToolMessage):
                     # Find matching tool call to pass arguments
                     tc_args = "{}"
-                    for tc in active_tool_calls.values():
-                        if tc["id"] == getattr(msg, "tool_call_id", "") or tc["name"] == msg.name:
+                    for tc_key, tc in list(active_tool_calls.items()):
+                        if tc["id"] == getattr(msg, "tool_call_id", ""):
                             tc_args = tc["args"]
+                            
+                            # Delete the specific key from the dictionary
+                            del active_tool_calls[tc_key]
                             break
                     
                     try:
