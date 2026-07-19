@@ -4,7 +4,10 @@ load_dotenv()
 import json
 import typer
 from rich.console import Console
-from rich.prompt import Prompt
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.styles import Style
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.live import Live
@@ -36,21 +39,21 @@ def render_tool_request(console: Console, name: str, args: dict):
     console.print(Panel(
         f"[bold cyan]Tool Requested:[/bold cyan] {name}\n\n[bold green]Arguments:[/bold green]\n[dim]{args_str}[/dim]",
         title="* Tool Execution Requested",
-        border_style="cyan"
+        border_style='cyan'
     ))
 
 def render_tool_result(console: Console, name: str, result: str):
     console.print(Panel(
         f"[bold cyan]Tool Responded:[/bold cyan] {name}\n\n[bold green]Result:[/bold green]\n[dim]{result}[/dim]",
         title="* Tool Execution Result",
-        border_style="green"
+        border_style='green'
     ))
 
 class CLIRenderer:
     def __init__(self, console: Console):
         self.console = console
         self.live = None
-        self.full_response = ""
+        self.full_response = ''
 
     def start_live(self):
         if not self.live:
@@ -62,14 +65,14 @@ class CLIRenderer:
             if self.full_response:
                 self.live.update(Markdown(self.full_response))
             else:
-                self.live.update("")
+                self.live.update('')
             self.live.stop()
             self.live = None
 
     def handle_event(self, event: ChatEvent):
         if isinstance(event, AgentThinkingEvent):
             self.start_live()
-            self.live.update(Spinner("dots", text="[dim]Thinking...[/dim]"))
+            self.live.update(Spinner('dots', text="[dim]Thinking...[/dim]"))
             
         elif isinstance(event, AgentMessageStartEvent):
             pass
@@ -87,19 +90,19 @@ class CLIRenderer:
             self.stop_live()
             render_tool_result(self.console, event.tool_name, event.result)
             # Reset response because the agent might say something after the tool
-            self.full_response = ""
+            self.full_response = ''
             
         elif isinstance(event, AgentToolErrorEvent):
             self.stop_live()
             render_tool_result(self.console, event.tool_name, f"Error: {event.error}")
-            self.full_response = ""
+            self.full_response = ''
 
         elif isinstance(event, AgentTurnCompleteEvent):
             self.stop_live()
 
 @app.command()
 def main():
-    console.print(Panel.fit("[bold blue]Database Sandbox CLI[/bold blue]", border_style="blue"))
+    console.print(Panel.fit("[bold blue]Database Sandbox CLI[/bold blue]", border_style='blue'))
     
     agent = ChatAgent()
     renderer = CLIRenderer(console)
@@ -123,17 +126,36 @@ def main():
             elif isinstance(event, AgentToolErrorEvent):
                 render_tool_result(console, event.tool_name, f"Error: {event.error}")
                 
+    session = PromptSession()
+    
+    bindings = KeyBindings()
+
+    @bindings.add('enter')
+    def _(event):
+        event.current_buffer.validate_and_handle()
+
+    @bindings.add('escape', 'enter')
+    def _(event):
+        event.current_buffer.insert_text('\n')
+        
     while True:
         try:
-            prompt = Prompt.ask("\n[bold green]You[/bold green]")
-            if prompt.lower() in ['quit', 'exit', 'q']:
+            prompt = session.prompt(
+                HTML("\n<ansigreen><b>You:</b></ansigreen>\n"),
+                multiline=True,
+                key_bindings=bindings,
+                bottom_toolbar=HTML("<b>[Enter] to send | [Esc] -> [Enter] for new line | /quit or /exit to exit</b>"),
+                style=Style.from_dict({'bottom-toolbar': 'default'})
+            )
+            
+            if prompt.strip() in ['/quit', '/exit']:
                 break
             if not prompt.strip():
                 continue
                 
             console.print("\n[bold blue]Assistant:[/bold blue]")
             
-            renderer.full_response = ""
+            renderer.full_response = ''
             agent.send_message(prompt)
                 
         except (KeyboardInterrupt, EOFError):
@@ -141,5 +163,5 @@ def main():
             
     console.print("\n[bold blue]Goodbye![/bold blue]")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app()

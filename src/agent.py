@@ -17,7 +17,7 @@ def list_tables() -> str:
     try:
         with get_readonly_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            cursor.execute('SELECT name FROM sqlite_master WHERE type="table";')
             tables = []
             for row in cursor.fetchall():
                 name = row['name']
@@ -39,20 +39,20 @@ def describe_table(table_name: str) -> str:
             cursor = conn.cursor()
             
             # Verify table exists to prevent SQL injection in pragma
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
+            cursor.execute('SELECT name FROM sqlite_master WHERE type="table" AND name=?;', (table_name,))
             if not cursor.fetchone():
                 return f"Table '{table_name}' does not exist."
                 
             # Get schema
-            cursor.execute(f"PRAGMA table_info({table_name});")
+            cursor.execute(f'PRAGMA table_info({table_name});')
             columns = cursor.fetchall()
             
             # Get foreign keys
-            cursor.execute(f"PRAGMA foreign_key_list({table_name});")
+            cursor.execute(f'PRAGMA foreign_key_list({table_name});')
             fks = cursor.fetchall()
             
             # Get sample data
-            cursor.execute(f"SELECT * FROM {table_name} LIMIT 3;")
+            cursor.execute(f'SELECT * FROM {table_name} LIMIT 3;')
             sample_rows = cursor.fetchall()
             
             output = [f"Schema for table '{table_name}':", "Columns:"]
@@ -122,7 +122,7 @@ class AgentState(BaseModel):
     errors: Optional[List[str]] = None
 
 # Initialize the model and tools
-llm = ChatGoogleGenerativeAI(model=os.environ.get("MODEL"))
+llm = ChatGoogleGenerativeAI(model=os.environ.get('MODEL'))
 tools = [list_tables, describe_table, execute_read_query]
 
 system_prompt = """You are a helpful AI assistant connected to a local SQLite database sandbox.
@@ -140,12 +140,12 @@ def call_model(state: AgentState):
 # Create the native LangGraph StateGraph
 workflow = StateGraph(AgentState)
 
-workflow.add_node("agent", call_model)
-workflow.add_node("tools", ToolNode(tools))
+workflow.add_node('agent', call_model)
+workflow.add_node('tools', ToolNode(tools))
 
-workflow.add_edge(START, "agent")
-workflow.add_conditional_edges("agent", tools_condition)
-workflow.add_edge("tools", "agent")
+workflow.add_edge(START, 'agent')
+workflow.add_conditional_edges('agent', tools_condition)
+workflow.add_edge('tools', 'agent')
 
 # Implement MemorySaver
 memory = MemorySaver()

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 import urllib.request
 
 # The database file will be stored in the root directory
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sandbox.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'sandbox.db')
 
 @contextmanager
 def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
@@ -26,7 +26,7 @@ def get_readonly_connection() -> Generator[sqlite3.Connection, None, None]:
     Context manager to yield a read-only database connection.
     """
     safe_path = urllib.request.pathname2url(DB_PATH)
-    uri = f"file:{safe_path}?mode=ro"
+    uri = f'file:{safe_path}?mode=ro'
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -55,7 +55,7 @@ def init_db() -> None:
         
         conn.commit()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     print(f"Initializing database at {DB_PATH}")
     init_db()
     print("Database initialized successfully.")

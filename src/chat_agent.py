@@ -9,7 +9,7 @@ load_dotenv()
 
 import warnings
 from langchain_core._api import LangChainBetaWarning
-warnings.filterwarnings("ignore", category=LangChainBetaWarning)
+warnings.filterwarnings('ignore', category=LangChainBetaWarning)
 
 from uuid import uuid4
 from dataclasses import dataclass, field
@@ -27,49 +27,49 @@ class ChatEvent:
 @dataclass
 class UserMessageEvent(ChatEvent):
     content: str
-    event_type: str = field(default="user_message", init=False)
+    event_type: str = field(default='user_message', init=False)
 
 @dataclass
 class AgentMessageCompleteEvent(ChatEvent):
     content: str
-    event_type: str = field(default="agent_message_complete", init=False)
+    event_type: str = field(default='agent_message_complete', init=False)
 
 @dataclass
 class AgentThinkingEvent(ChatEvent):
-    event_type: str = field(default="agent_thinking", init=False)
+    event_type: str = field(default='agent_thinking', init=False)
 
 @dataclass
 class AgentToolRequestEvent(ChatEvent):
     tool_name: str
     arguments: Dict[str, Any]
-    event_type: str = field(default="agent_tool_request", init=False)
+    event_type: str = field(default='agent_tool_request', init=False)
 
 @dataclass
 class AgentToolResultEvent(ChatEvent):
     tool_name: str
     arguments: Dict[str, Any]
     result: Any
-    event_type: str = field(default="agent_tool_result", init=False)
+    event_type: str = field(default='agent_tool_result', init=False)
 
 @dataclass
 class AgentToolErrorEvent(ChatEvent):
     tool_name: str
     arguments: Dict[str, Any]
     error: str
-    event_type: str = field(default="agent_tool_error", init=False)
+    event_type: str = field(default='agent_tool_error', init=False)
 
 @dataclass
 class AgentMessageStartEvent(ChatEvent):
-    event_type: str = field(default="agent_message_start", init=False)
+    event_type: str = field(default='agent_message_start', init=False)
 
 @dataclass
 class AgentMessageChunkEvent(ChatEvent):
     chunk: str
-    event_type: str = field(default="agent_message_chunk", init=False)
+    event_type: str = field(default='agent_message_chunk', init=False)
 
 @dataclass
 class AgentTurnCompleteEvent(ChatEvent):
-    event_type: str = field(default="agent_turn_complete", init=False)
+    event_type: str = field(default='agent_turn_complete', init=False)
 
 class ChatAgent:
     """
@@ -84,7 +84,7 @@ class ChatAgent:
         Initialize a new or existing chat session.
         """
         self.history: List[ChatEvent] = []
-        self.config = {"configurable": {"thread_id": str(uuid4())}, "recursion_limit": 10}
+        self.config = {'configurable': {'thread_id': str(uuid4())}, 'recursion_limit': 10}
         self._listeners: List[Callable[[ChatEvent], None]] = []
     
     def add_listener(self, listener: Callable[[ChatEvent], None]) -> None:
@@ -111,64 +111,64 @@ class ChatAgent:
         """
         self._emit(UserMessageEvent(content=message))
         
-        input_state = {"messages": [{"role": "user", "content": message}]}
+        input_state = {'messages': [{'role': 'user', 'content': message}]}
 
         stream = agent.stream_events(
             input_state,
             self.config,
-            version="v3",
+            version='v3',
             transformers=[ToolCallTransformer]
         )
 
         active_tools: Dict[str, Dict[str, Any]] = {}
-        current_msg_buffer = ""
+        current_msg_buffer = ''
         self._emit(AgentThinkingEvent())
         
         for event in stream:
-            if event["method"] == "messages":
-                payload_dict = event["params"]["data"][0]
-                event_type = payload_dict["event"]
+            if event['method'] == 'messages':
+                payload_dict = event['params']['data'][0]
+                event_type = payload_dict['event']
 
-                if event_type == "content-block-start":
-                    block_type = payload_dict["content"]["type"]
-                    if block_type == "text":
+                if event_type == 'content-block-start':
+                    block_type = payload_dict['content']['type']
+                    if block_type == 'text':
                         self._emit(AgentMessageStartEvent())
-                        current_msg_buffer = ""
-                elif event_type == "content-block-delta":
-                    delta = payload_dict["delta"]
-                    if delta["type"] == "text-delta":
-                        text_chunk = delta["text"]
+                        current_msg_buffer = ''
+                elif event_type == 'content-block-delta':
+                    delta = payload_dict['delta']
+                    if delta['type'] == 'text-delta':
+                        text_chunk = delta['text']
                         self._emit(AgentMessageChunkEvent(chunk=text_chunk))
                         current_msg_buffer += text_chunk
-                elif event_type == "content-block-finish":
+                elif event_type == 'content-block-finish':
                     if current_msg_buffer:
                         self._emit(AgentMessageCompleteEvent(content=current_msg_buffer))
-                        current_msg_buffer = ""
-            elif event["method"] == "tools":
-                data = event["params"]["data"]
-                if data["event"] == "tool-started":
-                    tool_name = data["tool_name"]
-                    tool_input = data["input"]
-                    tool_call_id = data["tool_call_id"]
+                        current_msg_buffer = ''
+            elif event['method'] == 'tools':
+                data = event['params']['data']
+                if data['event'] == 'tool-started':
+                    tool_name = data['tool_name']
+                    tool_input = data['input']
+                    tool_call_id = data['tool_call_id']
                     active_tools[tool_call_id] = {
-                        "tool_name": tool_name,
-                        "input": tool_input
+                        'tool_name': tool_name,
+                        'input': tool_input
                     }
                     self._emit(AgentToolRequestEvent(tool_name=tool_name, arguments=tool_input))
-                elif data["event"] == "tool-finished":
-                    tool_message = data["output"]
-                    tool_output = tool_message.content if hasattr(tool_message, "content") else str(tool_message)
-                    tool_call_id = data["tool_call_id"]
+                elif data['event'] == 'tool-finished':
+                    tool_message = data['output']
+                    tool_output = tool_message.content if hasattr(tool_message, 'content') else str(tool_message)
+                    tool_call_id = data['tool_call_id']
                     active_tool = active_tools.pop(tool_call_id, {})
-                    t_name = active_tool.get("tool_name", "Unknown")
-                    t_input = active_tool.get("input", {})
+                    t_name = active_tool.get('tool_name', 'Unknown')
+                    t_input = active_tool.get('input', {})
                     self._emit(AgentToolResultEvent(tool_name=t_name, arguments=t_input, result=tool_output))
                     self._emit(AgentThinkingEvent())
-                elif data["event"] == "tool-error":
-                    tool_call_id = data["tool_call_id"]
+                elif data['event'] == 'tool-error':
+                    tool_call_id = data['tool_call_id']
                     active_tool = active_tools.pop(tool_call_id, {})
-                    t_name = active_tool.get("tool_name", "Unknown")
-                    t_input = active_tool.get("input", {})
+                    t_name = active_tool.get('tool_name', 'Unknown')
+                    t_input = active_tool.get('input', {})
                     self._emit(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error="Tool Failed"))
                     self._emit(AgentThinkingEvent())
                     
@@ -180,7 +180,7 @@ class ChatAgent:
         """
         return self.history
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     print("\n--- Initializing Agent ---")
     testAgent = ChatAgent()
     
