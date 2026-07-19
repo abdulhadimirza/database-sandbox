@@ -1,3 +1,4 @@
+from openai.types.shared import reasoning_effort
 import os
 import time
 from typing import Annotated, List, Optional
@@ -5,6 +6,7 @@ from pydantic import BaseModel
 from langchain_core.messages import AnyMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_deepseek import ChatDeepSeek
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -121,12 +123,35 @@ class AgentState(BaseModel):
     active_query: Optional[str] = None
     errors: Optional[List[str]] = None
 
-# Initialize the model and tools
-llm = ChatGoogleGenerativeAI(model=os.environ.get('MODEL'))
+def get_llm(provider: str):
+    if provider == 'deepseek':
+        return ChatDeepSeek(
+            model=os.environ.get('DEEPSEEK_MODEL'),
+            reasoning_effort='low',
+            temperature=0,
+            max_retries=2,
+            extra_body={
+                'thinking': {
+                    'type': 'disabled'
+                }
+            },
+        )
+    elif provider == 'google':
+        return ChatGoogleGenerativeAI(
+            model=os.environ.get('GEMINI_MODEL'),
+            thinking_level='low',
+            temperature=0,
+            max_retries=2,
+        )
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+llm = get_llm('google') # By default use Google; if encounter 20 RPM limit, change to Deepseek
 tools = [list_tables, describe_table, execute_read_query]
 
 system_prompt = """You are a helpful AI assistant connected to a local SQLite database sandbox.
-You have access to tools to query the database."""
+You have access to tools to query the database.
+Be brief in your responses."""
 
 llm_with_tools = llm.bind_tools(tools)
 
