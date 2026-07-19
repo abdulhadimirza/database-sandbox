@@ -33,12 +33,14 @@ class AgentToolRequestEvent(ChatEvent):
 @dataclass
 class AgentToolResultEvent(ChatEvent):
     tool_name: str
+    arguments: Dict[str, Any]
     result: Any
     event_type: str = field(default="agent_tool_result", init=False)
 
 @dataclass
 class AgentToolErrorEvent(ChatEvent):
     tool_name: str
+    arguments: Dict[str, Any]
     error: str
     event_type: str = field(default="agent_tool_error", init=False)
 
@@ -136,13 +138,15 @@ class ChatAgent:
                     tool_call_id = data["tool_call_id"]
                     active_tool = active_tools.pop(tool_call_id, {})
                     t_name = active_tool.get("tool_name", "Unknown")
-                    self._emit(AgentToolResultEvent(tool_name=t_name, result=tool_output))
+                    t_input = active_tool.get("input", {})
+                    self._emit(AgentToolResultEvent(tool_name=t_name, arguments=t_input, result=tool_output))
                     self._emit(AgentThinkingEvent())
                 elif data["event"] == "tool-error":
                     tool_call_id = data["tool_call_id"]
                     active_tool = active_tools.pop(tool_call_id, {})
                     t_name = active_tool.get("tool_name", "Unknown")
-                    self._emit(AgentToolErrorEvent(tool_name=t_name, error="Tool Failed"))
+                    t_input = active_tool.get("input", {})
+                    self._emit(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error="Tool Failed"))
                     self._emit(AgentThinkingEvent())
                     
         self._emit(AgentTurnCompleteEvent())
