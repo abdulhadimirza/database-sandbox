@@ -1,4 +1,3 @@
-from openai.types.shared import reasoning_effort
 import os
 import time
 from typing import Annotated, List, Optional
