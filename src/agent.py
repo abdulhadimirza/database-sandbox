@@ -128,12 +128,12 @@ tools = [list_tables, describe_table, execute_read_query]
 system_prompt = """You are a helpful AI assistant connected to a local SQLite database sandbox.
 You have access to tools to query the database."""
 
+llm_with_tools = llm.bind_tools(tools)
+
 def call_model(state: AgentState):
-    llm_with_tools = llm.bind_tools(tools)
-    
     # Prepend the system prompt safely for this invocation
     messages = [SystemMessage(content=system_prompt)] + state.messages
-        
+    
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
 

@@ -4,15 +4,15 @@ ChatAgent abstraction layer.
 This module defines the ChatAgent class, which serves as a decoupled abstraction
 between the display interface (CLI/UI) and the underlying agent logic.
 """
-from langchain_core.messages import AIMessage, ToolMessage
-from uuid import uuid4
+from google.genai.types import ToolCallDict
 from dotenv import load_dotenv
 load_dotenv()
 
-from typing import List, Dict, Any, Optional, Callable
-from dataclasses import dataclass
-
+from uuid import uuid4
 from dataclasses import dataclass, field
+from typing import List, Dict, Any, Callable
+from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.prebuilt import ToolCallTransformer
 
 from agent import agent
 
@@ -89,9 +89,18 @@ class ChatAgent:
         """
         
         input_state = {"messages": [{"role": "user", "content": message}]}
-        stream = agent.stream_events(input_state, self.config, version="v3")
+
+        stream = agent.stream_events(
+            input_state,
+            self.config,
+            version="v3",
+            transformers=[ToolCallTransformer]
+        )
+
+        active_tools = {}
         for event in stream:
             if event["method"] == "messages":
+                #print("\n[DEBUG]\n", event)
                 payload_dict = event["params"]["data"][0]
                 # metadata_dict = event["params"]["data"][1]
 
@@ -101,23 +110,43 @@ class ChatAgent:
                     delta = payload_dict["delta"]
                     if delta["type"] == "text-delta":
                         print(delta["text"], end="", flush=True)
-                
-            elif event["method"] == "values":
-                current_state = event["params"]["data"]
-
-                messages = getattr(current_state, "messages", [])
-                
-                if messages:
-                    last_msg = messages[-1]
-                    
-                    # Tool Request
-                    if isinstance(last_msg, AIMessage) and getattr(last_msg, "tool_calls", None):
-                        for tool_call in last_msg.tool_calls:
-                            print(f"\n[Tool Requested]: {tool_call['name']}({tool_call['args']})")
-                            
-                    # Tool Result
-                    elif isinstance(last_msg, ToolMessage):
-                        print(f"\n[Tool Result]: {last_msg.name} -> {last_msg.content}")
+                elif event_type == "message-start":
+                    role = payload_dict["role"]
+                    print(f"\n[Message Start] Role: {role}")
+                elif event_type == "message-finish":
+                    print(f"\n[Message Finish]")
+                elif event_type == "content-block-start":
+                    block_type = payload_dict["content"]["type"]
+                    print(f"\n[Content Block Start] Type: {block_type}")
+                elif event_type == "content-block-finish":
+                    block_type = payload_dict["content"]["type"]
+                    print(f"\n[Content Block Finish] Type: {block_type}")
+            elif event["method"] == "tools":
+                #print("\n[DEBUG]\n", event)
+                data = event["params"]["data"]
+                if data["event"] == "tool-started":
+                    tool_name = data["tool_name"]
+                    tool_input = data["input"]
+                    tool_call_id = data["tool_call_id"]
+                    active_tools[tool_call_id] = {
+                        "tool_name": tool_name,
+                        "input": tool_input
+                    }
+                    print(f"Tool Request: {tool_name} with input {tool_input}")
+                elif data["event"] == "tool-finished":
+                    tool_message = data["output"]
+                    tool_output = tool_message.content if hasattr(tool_message, "content") else str(tool_message)
+                    tool_call_id = data["tool_call_id"]
+                    active_tool = active_tools.pop(tool_call_id, {})
+                    t_name = active_tool.get("tool_name", "Unknown")
+                    t_input = active_tool.get("input", {})
+                    print(f"Tool Finished [{tool_call_id}] - {t_name}({t_input}) -> Result: {tool_output}")
+                elif data["event"] == "tool-error":
+                    tool_call_id = data["tool_call_id"]
+                    active_tool = active_tools.pop(tool_call_id, {})
+                    t_name = active_tool.get("tool_name", "Unknown")
+                    t_input = active_tool.get("input", {})
+                    print(f"Tool Failed [{tool_call_id}] - {t_name}({t_input})")
         
     def get_history(self) -> List[ChatEvent]:
         """
