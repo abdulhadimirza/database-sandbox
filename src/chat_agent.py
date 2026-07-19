@@ -4,7 +4,6 @@ ChatAgent abstraction layer.
 This module defines the ChatAgent class, which serves as a decoupled abstraction
 between the display interface (CLI/UI) and the underlying agent logic.
 """
-from google.genai.types import ToolCallDict
 from dotenv import load_dotenv
 load_dotenv()
 
