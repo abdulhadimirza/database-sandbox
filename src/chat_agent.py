@@ -22,32 +22,39 @@ class ChatEvent:
     event_type: str = field(init=False)
 
 @dataclass
-class MessageEvent(ChatEvent):
-    role: str  # 'user' or 'agent'
-    content: str
-    event_type: str = field(default="message", init=False)
+class AgentThinkingEvent(ChatEvent):
+    event_type: str = field(default="agent_thinking", init=False)
 
 @dataclass
-class MessageChunkEvent(ChatEvent):
-    """Fired when a chunk of a message is received (for streaming)."""
-    role: str
-    chunk: str
-    event_type: str = field(default="message_chunk", init=False)
-
-@dataclass
-class ToolRequestEvent(ChatEvent):
+class AgentToolRequestEvent(ChatEvent):
     tool_name: str
     arguments: Dict[str, Any]
-    event_type: str = field(default="tool_request", init=False)
+    event_type: str = field(default="agent_tool_request", init=False)
 
 @dataclass
-class ToolResultEvent(ChatEvent):
+class AgentToolResultEvent(ChatEvent):
     tool_name: str
     result: Any
-    event_type: str = field(default="tool_result", init=False)
+    event_type: str = field(default="agent_tool_result", init=False)
 
-class HumanInTheLoopEvent(ChatEvent):
-    event_type: str = field(default="human_in_the_loop", init=False)
+@dataclass
+class AgentToolErrorEvent(ChatEvent):
+    tool_name: str
+    error: str
+    event_type: str = field(default="agent_tool_error", init=False)
+
+@dataclass
+class AgentMessageStartEvent(ChatEvent):
+    event_type: str = field(default="agent_message_start", init=False)
+
+@dataclass
+class AgentMessageChunkEvent(ChatEvent):
+    chunk: str
+    event_type: str = field(default="agent_message_chunk", init=False)
+
+@dataclass
+class AgentTurnCompleteEvent(ChatEvent):
+    event_type: str = field(default="agent_turn_complete", init=False)
 
 class ChatAgent:
     """
@@ -76,7 +83,7 @@ class ChatAgent:
         Internal method to add an event to history and notify listeners.
         Note: Chunk events are usually just emitted, while full messages are saved to history.
         """
-        if not isinstance(event, MessageChunkEvent):
+        if not isinstance(event, (AgentMessageChunkEvent, AgentThinkingEvent)):
             self.history.append(event)
             
         for listener in self._listeners:
@@ -98,31 +105,22 @@ class ChatAgent:
         )
 
         active_tools = {}
+        self._emit(AgentThinkingEvent())
+        
         for event in stream:
             if event["method"] == "messages":
-                #print("\n[DEBUG]\n", event)
                 payload_dict = event["params"]["data"][0]
-                # metadata_dict = event["params"]["data"][1]
-
                 event_type = payload_dict["event"]
 
-                if event_type == "content-block-delta":
+                if event_type == "content-block-start":
+                    block_type = payload_dict["content"]["type"]
+                    if block_type == "text":
+                        self._emit(AgentMessageStartEvent())
+                elif event_type == "content-block-delta":
                     delta = payload_dict["delta"]
                     if delta["type"] == "text-delta":
-                        print(delta["text"], end="", flush=True)
-                elif event_type == "message-start":
-                    role = payload_dict["role"]
-                    print(f"\n[Message Start] Role: {role}")
-                elif event_type == "message-finish":
-                    print(f"\n[Message Finish]")
-                elif event_type == "content-block-start":
-                    block_type = payload_dict["content"]["type"]
-                    print(f"\n[Content Block Start] Type: {block_type}")
-                elif event_type == "content-block-finish":
-                    block_type = payload_dict["content"]["type"]
-                    print(f"\n[Content Block Finish] Type: {block_type}")
+                        self._emit(AgentMessageChunkEvent(chunk=delta["text"]))
             elif event["method"] == "tools":
-                #print("\n[DEBUG]\n", event)
                 data = event["params"]["data"]
                 if data["event"] == "tool-started":
                     tool_name = data["tool_name"]
@@ -132,21 +130,23 @@ class ChatAgent:
                         "tool_name": tool_name,
                         "input": tool_input
                     }
-                    print(f"Tool Request: {tool_name} with input {tool_input}")
+                    self._emit(AgentToolRequestEvent(tool_name=tool_name, arguments=tool_input))
                 elif data["event"] == "tool-finished":
                     tool_message = data["output"]
                     tool_output = tool_message.content if hasattr(tool_message, "content") else str(tool_message)
                     tool_call_id = data["tool_call_id"]
                     active_tool = active_tools.pop(tool_call_id, {})
                     t_name = active_tool.get("tool_name", "Unknown")
-                    t_input = active_tool.get("input", {})
-                    print(f"Tool Finished [{tool_call_id}] - {t_name}({t_input}) -> Result: {tool_output}")
+                    self._emit(AgentToolResultEvent(tool_name=t_name, result=tool_output))
+                    self._emit(AgentThinkingEvent())
                 elif data["event"] == "tool-error":
                     tool_call_id = data["tool_call_id"]
                     active_tool = active_tools.pop(tool_call_id, {})
                     t_name = active_tool.get("tool_name", "Unknown")
-                    t_input = active_tool.get("input", {})
-                    print(f"Tool Failed [{tool_call_id}] - {t_name}({t_input})")
+                    self._emit(AgentToolErrorEvent(tool_name=t_name, error="Tool Failed"))
+                    self._emit(AgentThinkingEvent())
+                    
+        self._emit(AgentTurnCompleteEvent())
         
     def get_history(self) -> List[ChatEvent]:
         """
