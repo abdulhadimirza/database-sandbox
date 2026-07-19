@@ -19,6 +19,8 @@ from chat_agent import (
     AgentToolErrorEvent,
     AgentMessageStartEvent,
     AgentMessageChunkEvent,
+    AgentMessageCompleteEvent,
+    UserMessageEvent,
     AgentTurnCompleteEvent,
 )
 
@@ -108,10 +110,13 @@ def main():
     
     if history:
         console.print("[dim]Restoring previous session...[/dim]")
-        # NOTE: ChatAgent's history is missing User messages and the full Assistant text responses.
-        # We can only restore tool results that were saved in history.
         for event in history:
-            if isinstance(event, AgentToolRequestEvent):
+            if isinstance(event, UserMessageEvent):
+                console.print(f"[bold green]You:[/bold green] {event.content}")
+            elif isinstance(event, AgentMessageCompleteEvent):
+                console.print("\n[bold blue]Assistant:[/bold blue]")
+                console.print(Markdown(event.content))
+            elif isinstance(event, AgentToolRequestEvent):
                 render_tool_request(console, event.tool_name, event.arguments)
             elif isinstance(event, AgentToolResultEvent):
                 render_tool_result(console, event.tool_name, event.result)
