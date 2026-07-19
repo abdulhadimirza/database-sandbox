@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import json
 import typer
 from rich.console import Console
@@ -6,9 +9,6 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.live import Live
 from rich.spinner import Spinner
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from chat_agent import (
     ChatAgent,
