@@ -1,13 +1,11 @@
 import os
 import time
 
-from google.genai.errors import APIError
 from langchain_core.messages import SystemMessage
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .state import AgentState
-from .tools import tools
 
 deepseek = ChatDeepSeek(
     model=os.environ.get('DEEPSEEK_MODEL'),
@@ -64,10 +62,3 @@ def create_agent_node(system_prompt: str, node_tools: list):
         return {"messages": [response]}
         
     return node
-
-system_prompt = """You are a helpful AI assistant connected to a local SQLite database sandbox.
-You have access to tools to query the database.
-Be brief in your responses."""
-
-# Instantiate our node
-call_model = create_agent_node(system_prompt=system_prompt, node_tools=tools)

@@ -6,7 +6,10 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from utils.state import AgentState
 from utils.tools import tools
-from utils.nodes import call_model
+from utils.nodes import create_agent_node
+from utils.prompts import system_prompt
+
+call_model = create_agent_node(system_prompt=system_prompt, node_tools=tools)
 
 # Create the native LangGraph StateGraph
 workflow = StateGraph(AgentState)
