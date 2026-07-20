@@ -14,9 +14,10 @@ warnings.filterwarnings('ignore', category=LangChainBetaWarning)
 from uuid import uuid4
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Callable
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
 from langgraph.prebuilt import ToolCallTransformer
 from langgraph.errors import GraphRecursionError
+from langchain_core.runnables import RunnableConfig
 
 from agent import agent
 
@@ -90,7 +91,7 @@ class ChatAgent:
         Initialize a new or existing chat session.
         """
         self.history: List[ChatEvent] = []
-        self.config = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 10}
+        self.config: RunnableConfig = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 10}
         self._listeners: List[Callable[[ChatEvent], None]] = []
         self._restore_history()
         
@@ -102,8 +103,8 @@ class ChatAgent:
         if not state or 'messages' not in state.values:
             return
             
-        messages = state.values.get('messages', [])
-        tool_calls_map = {}
+        messages: List[BaseMessage] = state.values.get('messages', [])
+        tool_calls_map: Dict[str, Dict[str, Any]] = {}
         
         for msg in messages:
             if isinstance(msg, HumanMessage):
