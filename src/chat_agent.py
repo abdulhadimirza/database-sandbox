@@ -14,8 +14,9 @@ warnings.filterwarnings('ignore', category=LangChainBetaWarning)
 from uuid import uuid4
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Callable
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage, SystemMessage
 from langgraph.prebuilt import ToolCallTransformer
+from langgraph.errors import GraphRecursionError
 
 from agent import agent
 
@@ -71,6 +72,11 @@ class AgentMessageChunkEvent(ChatEvent):
 class AgentTurnCompleteEvent(ChatEvent):
     event_type: str = field(default='agent_turn_complete', init=False)
 
+@dataclass
+class AgentErrorEvent(ChatEvent):
+    error: str
+    event_type: str = field(default='agent_error', init=False)
+
 class ChatAgent:
     """
     A unified abstraction for an agentic chatbot session.
@@ -102,7 +108,16 @@ class ChatAgent:
             self.history.append(event)
             
         for listener in self._listeners:
-            listener(event)
+            try:
+                listener(event)
+            except Exception as e:
+                print(f"[ChatAgent] Listener error: {e}")
+
+    def _inject_error_to_agent_state(self, error_msg: str) -> None:
+        """
+        Inject an error message into the agent's state so the LLM is aware of the failure on the next turn.
+        """
+        agent.update_state(self.config, {"messages": [("system", f"The previous agent turn failed with error: {error_msg}")]})
             
     def send_message(self, message: str) -> None:
         """
@@ -113,66 +128,81 @@ class ChatAgent:
         
         input_state = {'messages': [{'role': 'user', 'content': message}]}
 
-        stream = agent.stream_events(
-            input_state,
-            self.config,
-            version='v3',
-            transformers=[ToolCallTransformer]
-        )
-
         active_tools: Dict[str, Dict[str, Any]] = {}
         current_msg_buffer = ''
-        self._emit(AgentThinkingEvent())
         
-        for event in stream:
-            if event['method'] == 'messages':
-                payload_dict = event['params']['data'][0]
-                event_type = payload_dict['event']
+        try:
+            stream = agent.stream_events(
+                input_state,
+                self.config,
+                version='v3',
+                transformers=[ToolCallTransformer]
+            )
 
-                if event_type == 'content-block-start':
-                    block_type = payload_dict['content']['type']
-                    if block_type == 'text':
-                        self._emit(AgentMessageStartEvent())
-                        current_msg_buffer = ''
-                elif event_type == 'content-block-delta':
-                    delta = payload_dict['delta']
-                    if delta['type'] == 'text-delta':
-                        text_chunk = delta['text']
-                        self._emit(AgentMessageChunkEvent(chunk=text_chunk))
-                        current_msg_buffer += text_chunk
-                elif event_type == 'content-block-finish':
-                    if current_msg_buffer:
-                        self._emit(AgentMessageCompleteEvent(content=current_msg_buffer))
-                        current_msg_buffer = ''
-            elif event['method'] == 'tools':
-                data = event['params']['data']
-                if data['event'] == 'tool-started':
-                    tool_name = data['tool_name']
-                    tool_input = data['input']
-                    tool_call_id = data['tool_call_id']
-                    active_tools[tool_call_id] = {
-                        'tool_name': tool_name,
-                        'input': tool_input
-                    }
-                    self._emit(AgentToolRequestEvent(tool_name=tool_name, arguments=tool_input))
-                elif data['event'] == 'tool-finished':
-                    tool_message = data['output']
-                    tool_output = tool_message.content if hasattr(tool_message, 'content') else str(tool_message)
-                    tool_call_id = data['tool_call_id']
-                    active_tool = active_tools.pop(tool_call_id, {})
-                    t_name = active_tool.get('tool_name', 'Unknown')
-                    t_input = active_tool.get('input', {})
-                    self._emit(AgentToolResultEvent(tool_name=t_name, arguments=t_input, result=tool_output))
-                    self._emit(AgentThinkingEvent())
-                elif data['event'] == 'tool-error':
-                    tool_call_id = data['tool_call_id']
-                    active_tool = active_tools.pop(tool_call_id, {})
-                    t_name = active_tool.get('tool_name', 'Unknown')
-                    t_input = active_tool.get('input', {})
-                    self._emit(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error="Tool Failed"))
-                    self._emit(AgentThinkingEvent())
-                    
-        self._emit(AgentTurnCompleteEvent())
+            self._emit(AgentThinkingEvent())
+            
+            for event in stream:
+                if event['method'] == 'messages':
+                    payload_dict = event['params']['data'][0]
+                    event_type = payload_dict['event']
+
+                    if event_type == 'content-block-start':
+                        block_type = payload_dict['content']['type']
+                        if block_type == 'text':
+                            self._emit(AgentMessageStartEvent())
+                            current_msg_buffer = ''
+                    elif event_type == 'content-block-delta':
+                        delta = payload_dict['delta']
+                        if delta['type'] == 'text-delta':
+                            text_chunk = delta['text']
+                            self._emit(AgentMessageChunkEvent(chunk=text_chunk))
+                            current_msg_buffer += text_chunk
+                    elif event_type == 'content-block-finish':
+                        if current_msg_buffer:
+                            self._emit(AgentMessageCompleteEvent(content=current_msg_buffer))
+                            current_msg_buffer = ''
+                elif event['method'] == 'tools':
+                    data = event['params']['data']
+                    if data['event'] == 'tool-started':
+                        tool_name = data['tool_name']
+                        tool_input = data['input']
+                        tool_call_id = data['tool_call_id']
+                        active_tools[tool_call_id] = {
+                            'tool_name': tool_name,
+                            'input': tool_input
+                        }
+                        self._emit(AgentToolRequestEvent(tool_name=tool_name, arguments=tool_input))
+                    elif data['event'] == 'tool-finished':
+                        tool_message = data['output']
+                        tool_output = tool_message.content if hasattr(tool_message, 'content') else str(tool_message)
+                        tool_call_id = data['tool_call_id']
+                        active_tool = active_tools.pop(tool_call_id, {})
+                        t_name = active_tool.get('tool_name', 'Unknown')
+                        t_input = active_tool.get('input', {})
+                        
+                        if isinstance(tool_output, str) and (tool_output.startswith("Error ") or tool_output.startswith("Database Error:")):
+                            self._emit(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error=tool_output))
+                        else:
+                            self._emit(AgentToolResultEvent(tool_name=t_name, arguments=t_input, result=tool_output))
+                            
+                        self._emit(AgentThinkingEvent())
+                    elif data['event'] == 'tool-error':
+                        tool_call_id = data['tool_call_id']
+                        active_tool = active_tools.pop(tool_call_id, {})
+                        t_name = active_tool.get('tool_name', 'Unknown')
+                        t_input = active_tool.get('input', {})
+                        self._emit(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error="Tool Failed"))
+                        self._emit(AgentThinkingEvent())
+        except GraphRecursionError as e:
+            error_msg = f"Recursion limit reached: {str(e)}"
+            self._emit(AgentErrorEvent(error=error_msg))
+            self._inject_error_to_agent_state(error_msg)
+        except Exception as e:
+            error_msg = f"Agent execution failed: {str(e)}"
+            self._emit(AgentErrorEvent(error=error_msg))
+            self._inject_error_to_agent_state(error_msg)
+        finally:
+            self._emit(AgentTurnCompleteEvent())
         
     def get_history(self) -> List[ChatEvent]:
         """
@@ -200,6 +230,8 @@ if __name__ == '__main__':
                 print(f"   Tool: {event.tool_name} requested")
             elif isinstance(event, AgentToolResultEvent):
                 print(f"   Tool: {event.tool_name} returned result")
+            elif isinstance(event, AgentErrorEvent):
+                print(f"   Error: {event.error}")
             
     # 2. Subscribe the UI to the agent
     testAgent.add_listener(my_ui_renderer)

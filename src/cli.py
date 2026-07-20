@@ -25,6 +25,7 @@ from chat_agent import (
     AgentMessageCompleteEvent,
     UserMessageEvent,
     AgentTurnCompleteEvent,
+    AgentErrorEvent,
 )
 
 console = Console()
@@ -47,6 +48,20 @@ def render_tool_result(console: Console, name: str, result: str):
         f"[bold cyan]Tool Responded:[/bold cyan] {name}\n\n[bold green]Result:[/bold green]\n[dim]{result}[/dim]",
         title="* Tool Execution Result",
         border_style='green'
+    ))
+
+def render_tool_error(console: Console, name: str, error: str):
+    console.print(Panel(
+        f"[bold cyan]Tool Failed:[/bold cyan] {name}\n\n[bold red]Error:[/bold red]\n[dim]{error}[/dim]",
+        title="* Tool Execution Error",
+        border_style='red'
+    ))
+
+def render_agent_error(console: Console, error: str):
+    console.print(Panel(
+        f"[bold red]Agent Error:[/bold red]\n[dim]{error}[/dim]",
+        title="* Error",
+        border_style='red'
     ))
 
 class CLIRenderer:
@@ -94,7 +109,12 @@ class CLIRenderer:
             
         elif isinstance(event, AgentToolErrorEvent):
             self.stop_live()
-            render_tool_result(self.console, event.tool_name, f"Error: {event.error}")
+            render_tool_error(self.console, event.tool_name, event.error)
+            self.full_response = ''
+
+        elif isinstance(event, AgentErrorEvent):
+            self.stop_live()
+            render_agent_error(self.console, event.error)
             self.full_response = ''
 
         elif isinstance(event, AgentTurnCompleteEvent):
@@ -124,7 +144,9 @@ def main():
             elif isinstance(event, AgentToolResultEvent):
                 render_tool_result(console, event.tool_name, event.result)
             elif isinstance(event, AgentToolErrorEvent):
-                render_tool_result(console, event.tool_name, f"Error: {event.error}")
+                render_tool_error(console, event.tool_name, event.error)
+            elif isinstance(event, AgentErrorEvent):
+                render_agent_error(console, event.error)
                 
     session = PromptSession()
     

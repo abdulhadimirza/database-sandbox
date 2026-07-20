@@ -138,9 +138,9 @@ def get_llm(provider: str):
     elif provider == 'google':
         return ChatGoogleGenerativeAI(
             model=os.environ.get('GEMINI_MODEL'),
-            thinking_level='low',
-            temperature=0,
-            max_retries=2,
+            #thinking_level='low',
+            #temperature=0,
+            #max_retries=2,
         )
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -149,8 +149,7 @@ llm = get_llm('google') # By default use Google; if encounter 20 RPM limit, chan
 tools = [list_tables, describe_table, execute_read_query]
 
 system_prompt = """You are a helpful AI assistant connected to a local SQLite database sandbox.
-You have access to tools to query the database.
-Be brief in your responses."""
+You have access to tools to query the database."""
 
 llm_with_tools = llm.bind_tools(tools)
 
