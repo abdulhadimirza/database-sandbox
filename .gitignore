@@ -1,4 +1,6 @@
 *.db
+*.db-shm
+*.db-wal
 
 .streamlit/secrets.toml
 .streamlit/config.toml

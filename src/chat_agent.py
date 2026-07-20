@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore', category=LangChainBetaWarning)
 from uuid import uuid4
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Callable
-from langchain_core.messages import AIMessage, ToolMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langgraph.prebuilt import ToolCallTransformer
 from langgraph.errors import GraphRecursionError
 
@@ -85,13 +85,73 @@ class ChatAgent:
     (like MessageChunkEvent for streaming) and update themselves accordingly.
     """
     
-    def __init__(self):
+    def __init__(self, thread_id: str = 'default_session'):
         """
         Initialize a new or existing chat session.
         """
         self.history: List[ChatEvent] = []
-        self.config = {'configurable': {'thread_id': str(uuid4())}, 'recursion_limit': 10}
+        self.config = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 10}
         self._listeners: List[Callable[[ChatEvent], None]] = []
+        self._restore_history()
+        
+    def _restore_history(self) -> None:
+        """
+        Restore chat history from the persisted state.
+        """
+        state = agent.get_state(self.config)
+        if not state or 'messages' not in state.values:
+            return
+            
+        messages = state.values.get('messages', [])
+        tool_calls_map = {}
+        
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                self.history.append(UserMessageEvent(content=msg.content))
+            elif isinstance(msg, AIMessage):
+                text_content = ""
+                if isinstance(msg.content, str):
+                    text_content = msg.content
+                elif isinstance(msg.content, list):
+                    for block in msg.content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text_content += block.get("text", "")
+                        elif isinstance(block, str):
+                            text_content += block
+                            
+                if text_content:
+                    self.history.append(AgentMessageStartEvent())
+                    self.history.append(AgentMessageCompleteEvent(content=text_content))
+                    
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tool_calls_map[tc['id']] = tc
+                        self.history.append(AgentToolRequestEvent(
+                            tool_name=tc['name'],
+                            arguments=tc['args']
+                        ))
+                
+                # If there are no tool calls, it means the agent finished its turn
+                if not getattr(msg, 'tool_calls', []):
+                    self.history.append(AgentTurnCompleteEvent())
+                    
+            elif isinstance(msg, ToolMessage):
+                tc = tool_calls_map.get(msg.tool_call_id)
+                t_name = tc['name'] if tc else getattr(msg, 'name', 'Unknown')
+                t_args = tc['args'] if tc else {}
+                
+                if getattr(msg, 'status', 'success') == 'error':
+                    self.history.append(AgentToolErrorEvent(
+                        tool_name=t_name,
+                        arguments=t_args,
+                        error=msg.content if isinstance(msg.content, str) else str(msg.content)
+                    ))
+                else:
+                    self.history.append(AgentToolResultEvent(
+                        tool_name=t_name,
+                        arguments=t_args,
+                        result=msg.content
+                    ))
     
     def add_listener(self, listener: Callable[[ChatEvent], None]) -> None:
         """

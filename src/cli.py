@@ -72,17 +72,15 @@ class CLIRenderer:
 
     def start_live(self):
         if not self.live:
-            self.live = Live(console=self.console, refresh_per_second=10)
+            self.live = Live(console=self.console, refresh_per_second=10, transient=True)
             self.live.start()
 
     def stop_live(self):
         if self.live:
-            if self.full_response:
-                self.live.update(Markdown(self.full_response))
-            else:
-                self.live.update('')
             self.live.stop()
             self.live = None
+            if self.full_response:
+                self.console.print(Markdown(self.full_response))
 
     def handle_event(self, event: ChatEvent):
         if isinstance(event, AgentThinkingEvent):
@@ -135,9 +133,9 @@ def main():
         console.print("[dim]Restoring previous session...[/dim]")
         for event in history:
             if isinstance(event, UserMessageEvent):
-                console.print(f"[bold green]You:[/bold green] {event.content}")
-            elif isinstance(event, AgentMessageCompleteEvent):
+                console.print(f"\n[bold green]You:[/bold green]\n{event.content}")
                 console.print("\n[bold blue]Assistant:[/bold blue]")
+            elif isinstance(event, AgentMessageCompleteEvent):
                 console.print(Markdown(event.content))
             elif isinstance(event, AgentToolRequestEvent):
                 render_tool_request(console, event.tool_name, event.arguments)
