@@ -180,7 +180,7 @@ class ChatAgent:
                         t_name = active_tool.get('tool_name', 'Unknown')
                         t_input = active_tool.get('input', {})
                         
-                        if isinstance(tool_output, str) and (tool_output.startswith("Error ") or tool_output.startswith("Database Error:")):
+                        if getattr(tool_message, 'status', 'success') == 'error':
                             self._emit(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error=tool_output))
                         else:
                             self._emit(AgentToolResultEvent(tool_name=t_name, arguments=t_input, result=tool_output))

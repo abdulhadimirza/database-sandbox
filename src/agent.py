@@ -3,7 +3,7 @@ import time
 from typing import Annotated, List, Optional
 from pydantic import BaseModel
 from langchain_core.messages import AnyMessage, SystemMessage
-from langchain_core.tools import tool
+from langchain_core.tools import tool, ToolException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_deepseek import ChatDeepSeek
 from langgraph.graph import StateGraph, START, END
@@ -12,7 +12,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from database import get_readonly_connection
 
-@tool
+@tool()
 def list_tables() -> str:
     """Query the database to return only a list of available table names."""
     try:
@@ -30,9 +30,9 @@ def list_tables() -> str:
                 
             return "\n".join(tables)
     except Exception as e:
-        return f"Error reading tables: {e}"
+        raise ToolException(f"Error reading tables: {e}")
 
-@tool
+@tool()
 def describe_table(table_name: str) -> str:
     """Given a table name, execute PRAGMA table_info and PRAGMA foreign_key_list to fetch the schema, AND run SELECT * FROM table_name LIMIT 3 to fetch a data sample."""
     try:
@@ -77,7 +77,7 @@ def describe_table(table_name: str) -> str:
                 
             return "\n".join(output)
     except Exception as e:
-        return f"Error describing table '{table_name}': {e}"
+        raise ToolException(f"Error describing table '{table_name}': {e}")
 
 def create_timeout_handler(timeout_seconds: float):
     start_time = time.time()
@@ -87,7 +87,7 @@ def create_timeout_handler(timeout_seconds: float):
         return 0
     return progress_handler
 
-@tool
+@tool()
 def execute_read_query(query: str) -> str:
     """Safely execute a raw SQL query provided by the LLM and return the results."""
     try:
@@ -113,7 +113,11 @@ def execute_read_query(query: str) -> str:
                 
             return "\n".join(output)
     except Exception as e:
-        return f"Database Error: {e}"
+        raise ToolException(f"Database Error: {e}")
+
+list_tables.handle_tool_error = True
+describe_table.handle_tool_error = True
+execute_read_query.handle_tool_error = True
 
 # Define the state schema
 class AgentState(BaseModel):
