@@ -38,6 +38,7 @@ def create_agent_node(system_prompt: str, node_tools: list):
         global _rate_limit_reset_time
         
         messages = [SystemMessage(content=system_prompt)] + state.messages
+
         current_time = time.time()
         
         if current_time < _rate_limit_reset_time:

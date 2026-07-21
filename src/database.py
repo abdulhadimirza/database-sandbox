@@ -42,17 +42,89 @@ def init_db() -> None:
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # Example schema: Create a simple users or items table as a starting point
-        # For a sandbox, this can be easily modified later
+        # Create Users table
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sample_table (
+            CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                description TEXT,
+                email TEXT UNIQUE NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
+        # Create Products table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                price REAL NOT NULL,
+                stock INTEGER NOT NULL
+            )
+        ''')
+        
+        # Create Orders table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        # Create Order Items table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS order_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                quantity INTEGER NOT NULL,
+                price_at_time REAL NOT NULL,
+                FOREIGN KEY (order_id) REFERENCES orders(id),
+                FOREIGN KEY (product_id) REFERENCES products(id)
+            )
+        ''')
+        
+        # Insert Mock Data if the database is empty
+        cursor.execute('SELECT COUNT(*) as count FROM users')
+        if cursor.fetchone()['count'] == 0:
+            print("Inserting mock data...")
+            
+            # Users
+            users = [
+                ('Alice Smith', 'alice@example.com'),
+                ('Bob Jones', 'bob@example.com'),
+                ('Charlie Brown', 'charlie@example.com')
+            ]
+            cursor.executemany('INSERT INTO users (name, email) VALUES (?, ?)', users)
+            
+            # Products
+            products = [
+                ('Laptop', 1200.50, 10),
+                ('Mouse', 25.00, 50),
+                ('Keyboard', 75.00, 30),
+                ('Monitor', 300.00, 15)
+            ]
+            cursor.executemany('INSERT INTO products (name, price, stock) VALUES (?, ?, ?)', products)
+            
+            # Orders
+            orders = [
+                (1, 'shipped'),
+                (2, 'pending'),
+                (1, 'delivered')
+            ]
+            cursor.executemany('INSERT INTO orders (user_id, status) VALUES (?, ?)', orders)
+            
+            # Order Items
+            order_items = [
+                (1, 1, 1, 1200.50), # Alice ordered 1 Laptop
+                (1, 2, 2, 25.00),   # Alice ordered 2 Mice
+                (2, 3, 1, 75.00),   # Bob ordered 1 Keyboard
+                (3, 4, 2, 300.00)   # Alice (2nd order) ordered 2 Monitors
+            ]
+            cursor.executemany('INSERT INTO order_items (order_id, product_id, quantity, price_at_time) VALUES (?, ?, ?, ?)', order_items)
+            
         conn.commit()
 
 if __name__ == '__main__':

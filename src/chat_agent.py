@@ -91,7 +91,7 @@ class ChatAgent:
         Initialize a new or existing chat session.
         """
         self.history: List[ChatEvent] = []
-        self.config: RunnableConfig = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 10}
+        self.config: RunnableConfig = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 50}
         self._listeners: List[Callable[[ChatEvent], None]] = []
         self._restore_history()
         
