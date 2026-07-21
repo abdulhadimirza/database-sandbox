@@ -70,19 +70,26 @@ class CLIRenderer:
         self.live = None
         self.full_response = ''
 
+    def _debug(self, msg):
+        pass
+
     def start_live(self):
+        self._debug("start_live called")
         if not self.live:
-            self.live = Live(console=self.console, refresh_per_second=10, transient=True)
+            self.live = Live(console=self.console, refresh_per_second=10, transient=True, vertical_overflow="visible")
             self.live.start()
 
     def stop_live(self):
+        self._debug(f"stop_live called. live active: {bool(self.live)}. response len: {len(self.full_response)}")
         if self.live:
             self.live.stop()
             self.live = None
             if self.full_response:
+                self._debug("stop_live printing full_response")
                 self.console.print(Markdown(self.full_response))
 
     def handle_event(self, event: ChatEvent):
+        self._debug(f"handle_event: {type(event).__name__}")
         if isinstance(event, AgentThinkingEvent):
             self.start_live()
             self.live.update(Spinner('dots', text="[dim]Thinking...[/dim]"))

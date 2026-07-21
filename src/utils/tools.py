@@ -4,7 +4,7 @@ from langchain_core.tools import tool, ToolException
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from database import get_readonly_connection
+from database import get_readonly_connection, get_db_connection
 
 @tool()
 def list_tables() -> str:
@@ -109,8 +109,131 @@ def execute_read_query(query: str) -> str:
     except Exception as e:
         raise ToolException(f"Database Error: {e}")
 
+@tool()
+def get_column_distinct_values(table: str, column: str) -> str:
+    """Queries and returns the distinct categorical values in a specified column."""
+    try:
+        with get_readonly_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Verify table exists to prevent SQL injection in pragma
+            cursor.execute('SELECT name FROM sqlite_master WHERE type="table" AND name=?;', (table,))
+            if not cursor.fetchone():
+                return f"Table '{table}' does not exist."
+                
+            cursor.execute(f'PRAGMA table_info({table});')
+            columns = [row['name'] for row in cursor.fetchall()]
+            if column not in columns:
+                return f"Column '{column}' does not exist in table '{table}'."
+                
+            query = f'SELECT DISTINCT {column} FROM {table} LIMIT 100;'
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            
+            if not rows:
+                return f"No values found in column '{column}'."
+                
+            values = [str(row[column]) for row in rows]
+            return "\n".join(values)
+    except Exception as e:
+        raise ToolException(f"Error getting distinct values for '{table}.{column}': {e}")
+
+@tool()
+def get_table_statistics(table: str) -> str:
+    """Returns row counts and basic bounds (min/max) for a specified table."""
+    try:
+        with get_readonly_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Verify table exists
+            cursor.execute('SELECT name FROM sqlite_master WHERE type="table" AND name=?;', (table,))
+            if not cursor.fetchone():
+                return f"Table '{table}' does not exist."
+                
+            cursor.execute(f'PRAGMA table_info({table});')
+            columns = cursor.fetchall()
+            
+            cursor.execute(f'SELECT COUNT(*) as count FROM {table};')
+            count = cursor.fetchone()['count']
+            
+            output = [f"Statistics for table '{table}':", f"Total Rows: {count}"]
+            
+            numeric_types = ('INTEGER', 'REAL', 'NUMERIC')
+            for col in columns:
+                col_name = col['name']
+                col_type = col['type'].upper()
+                if any(t in col_type for t in numeric_types):
+                    cursor.execute(f'SELECT MIN({col_name}) as min_val, MAX({col_name}) as max_val FROM {table};')
+                    stats = cursor.fetchone()
+                    output.append(f"  {col_name} ({col['type']}): MIN = {stats['min_val']}, MAX = {stats['max_val']}")
+                    
+            return "\n".join(output)
+    except Exception as e:
+        raise ToolException(f"Error getting statistics for '{table}': {e}")
+
+@tool()
+def execute_write_query(query: str) -> str:
+    """Execute a raw SQL query that modifies the database (INSERT, UPDATE, DELETE, CREATE)."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            conn.commit()
+            
+            return f"Query executed successfully. Rows affected: {cursor.rowcount}"
+    except Exception as e:
+        raise ToolException(f"Database Error: {e}")
+
+@tool()
+def search_tables_by_keyword(keyword: str) -> str:
+    """Search for relevant tables based on a keyword match in table names or column names."""
+    try:
+        with get_readonly_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT name FROM sqlite_master WHERE type="table";')
+            tables = []
+            for row in cursor.fetchall():
+                name = row['name']
+                if name and not name.startswith('sqlite_'):
+                    tables.append(name)
+                    
+            matching_tables = set()
+            keyword_lower = keyword.lower()
+            
+            for table in tables:
+                if keyword_lower in table.lower():
+                    matching_tables.add(table)
+                    continue
+                    
+                cursor.execute(f'PRAGMA table_info({table});')
+                columns = cursor.fetchall()
+                for col in columns:
+                    if keyword_lower in col['name'].lower():
+                        matching_tables.add(table)
+                        break
+                        
+            if not matching_tables:
+                return f"No tables found matching keyword '{keyword}'."
+                
+            return "\n".join(sorted(list(matching_tables)))
+    except Exception as e:
+        raise ToolException(f"Error searching tables for keyword '{keyword}': {e}")
+
 list_tables.handle_tool_error = True
 describe_table.handle_tool_error = True
 execute_read_query.handle_tool_error = True
+get_column_distinct_values.handle_tool_error = True
+get_table_statistics.handle_tool_error = True
+execute_write_query.handle_tool_error = True
+search_tables_by_keyword.handle_tool_error = True
 
-tools = [list_tables, describe_table, execute_read_query]
+tools = [
+    list_tables, 
+    describe_table, 
+    execute_read_query,
+    get_column_distinct_values,
+    get_table_statistics,
+    execute_write_query,
+    search_tables_by_keyword
+]
