@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
+import shutil
 import typer
 from rich.console import Console
 from prompt_toolkit import PromptSession
@@ -103,7 +104,17 @@ class CLIRenderer:
             self.full_response += event.chunk
             if not self.live:
                 self.start_live()
-            self.live.update(Markdown(self.full_response + " ▌"))
+                
+            term_height = shutil.get_terminal_size().lines
+            max_lines = max(5, term_height - 10)
+            
+            lines = self.full_response.split("\n")
+            if len(lines) > max_lines:
+                display_text = "...\n" + "\n".join(lines[-max_lines:])
+            else:
+                display_text = self.full_response
+                
+            self.live.update(Markdown(display_text + " ▌"))
             
         elif isinstance(event, AgentMessageCompleteEvent):
             self.stop_live()
