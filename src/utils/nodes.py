@@ -10,7 +10,7 @@ from .state import AgentState
 deepseek = ChatDeepSeek(
     model=os.environ.get('DEEPSEEK_MODEL'),
     reasoning_effort='low',
-    temperature=0,
+    temperature=1.0,
     max_retries=2,
     extra_body={
         'thinking': {
@@ -22,7 +22,7 @@ deepseek = ChatDeepSeek(
 gemini = ChatGoogleGenerativeAI(
     model=os.environ.get('GEMINI_MODEL'),
     thinking_level='low',
-    temperature=0,
+    temperature=1.0,
     max_retries=2,
 )
 

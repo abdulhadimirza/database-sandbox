@@ -71,22 +71,24 @@ class CLIRenderer:
         self.full_response = ''
 
     def _debug(self, msg):
-        pass
+        pass#print(msg)
 
     def start_live(self):
         self._debug("start_live called")
         if not self.live:
-            self.live = Live(console=self.console, refresh_per_second=10, transient=True, vertical_overflow="visible")
+            self.live = Live(
+                console=self.console, 
+                refresh_per_second=10, 
+                transient=True, 
+                vertical_overflow="visible"
+            )
             self.live.start()
 
     def stop_live(self):
-        self._debug(f"stop_live called. live active: {bool(self.live)}. response len: {len(self.full_response)}")
+        self._debug(f"stop_live called. live active: {bool(self.live)}")
         if self.live:
             self.live.stop()
             self.live = None
-            if self.full_response:
-                self._debug("stop_live printing full_response")
-                self.console.print(Markdown(self.full_response))
 
     def handle_event(self, event: ChatEvent):
         self._debug(f"handle_event: {type(event).__name__}")
@@ -95,21 +97,30 @@ class CLIRenderer:
             self.live.update(Spinner('dots', text="[dim]Thinking...[/dim]"))
             
         elif isinstance(event, AgentMessageStartEvent):
-            pass
+            self.full_response = ''
             
         elif isinstance(event, AgentMessageChunkEvent):
             self.full_response += event.chunk
-            if self.live:
-                self.live.update(Markdown(self.full_response + "|"))
-                
+            if not self.live:
+                self.start_live()
+            self.live.update(Markdown(self.full_response + " ▌"))
+            
+        elif isinstance(event, AgentMessageCompleteEvent):
+            self.stop_live()
+            if self.full_response:
+                self.console.print(Markdown(self.full_response))
+            self.full_response = ''
+            
         elif isinstance(event, AgentToolRequestEvent):
             self.stop_live()
+            if self.full_response:
+                self.console.print(Markdown(self.full_response))
             render_tool_request(self.console, event.tool_name, event.arguments)
+            self.full_response = ''
             
         elif isinstance(event, AgentToolResultEvent):
             self.stop_live()
             render_tool_result(self.console, event.tool_name, event.result)
-            # Reset response because the agent might say something after the tool
             self.full_response = ''
             
         elif isinstance(event, AgentToolErrorEvent):
@@ -124,6 +135,9 @@ class CLIRenderer:
 
         elif isinstance(event, AgentTurnCompleteEvent):
             self.stop_live()
+            if self.full_response:
+                self.console.print(Markdown(self.full_response))
+            self.full_response = ''
 
 @app.command()
 def main():
