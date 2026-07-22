@@ -2,9 +2,6 @@ import time
 from langchain_core.tools import tool, ToolException
 from langgraph.types import interrupt
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_readonly_connection, get_db_connection
 
 @tool()

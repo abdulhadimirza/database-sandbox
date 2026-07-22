@@ -102,6 +102,11 @@ class ChatAgent:
         self.config: RunnableConfig = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 50}
         self._listeners: List[Callable[[ChatEvent], None]] = []
         self.is_paused: bool = False
+        
+    def load(self) -> None:
+        """
+        Load history and emit events to listeners.
+        """
         self._restore_history()
         
     def _restore_history(self) -> None:
@@ -117,7 +122,7 @@ class ChatAgent:
         
         for msg in messages:
             if isinstance(msg, HumanMessage):
-                self.history.append(UserMessageEvent(content=msg.content))
+                self._emit(UserMessageEvent(content=msg.content))
             elif isinstance(msg, AIMessage):
                 text_content = ""
                 if isinstance(msg.content, str):
@@ -130,20 +135,20 @@ class ChatAgent:
                             text_content += block
                             
                 if text_content:
-                    self.history.append(AgentMessageStartEvent())
-                    self.history.append(AgentMessageCompleteEvent(content=text_content))
+                    self._emit(AgentMessageStartEvent())
+                    self._emit(AgentMessageCompleteEvent(content=text_content))
                     
                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                     for tc in msg.tool_calls:
                         tool_calls_map[tc['id']] = tc
-                        self.history.append(AgentToolRequestEvent(
+                        self._emit(AgentToolRequestEvent(
                             tool_name=tc['name'],
                             arguments=tc['args']
                         ))
                 
                 # If there are no tool calls, it means the agent finished its turn
                 if not getattr(msg, 'tool_calls', []):
-                    self.history.append(AgentTurnCompleteEvent())
+                    self._emit(AgentTurnCompleteEvent())
                     
             elif isinstance(msg, ToolMessage):
                 tc = tool_calls_map.get(msg.tool_call_id)
@@ -151,13 +156,13 @@ class ChatAgent:
                 t_args = tc['args'] if tc else {}
                 
                 if getattr(msg, 'status', 'success') == 'error':
-                    self.history.append(AgentToolErrorEvent(
+                    self._emit(AgentToolErrorEvent(
                         tool_name=t_name,
                         arguments=t_args,
                         error=msg.content if isinstance(msg.content, str) else str(msg.content)
                     ))
                 else:
-                    self.history.append(AgentToolResultEvent(
+                    self._emit(AgentToolResultEvent(
                         tool_name=t_name,
                         arguments=t_args,
                         result=msg.content
@@ -372,6 +377,7 @@ if __name__ == '__main__':
             
     # 2. Subscribe the UI to the agent
     testAgent.add_listener(my_ui_renderer)
+    testAgent.load()
     
     # 3. Send message (agent will now emit events to the renderer)
     print("\n--- Sending First Message ---")

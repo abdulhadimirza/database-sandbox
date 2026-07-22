@@ -106,7 +106,12 @@ class CLIRenderer:
 
     def handle_event(self, event: ChatEvent):
         self._debug(f"handle_event: {type(event).__name__}")
-        if isinstance(event, AgentThinkingEvent):
+        if isinstance(event, UserMessageEvent):
+            self.stop_live()
+            self.console.print(f"\n[bold green]You:[/bold green]\n{event.content}")
+            self.console.print("\n[bold blue]Assistant:[/bold blue]")
+
+        elif isinstance(event, AgentThinkingEvent):
             self.start_live()
             self.live.update(Spinner('dots', text="[dim]Thinking...[/dim]"))
             
@@ -131,8 +136,9 @@ class CLIRenderer:
             
         elif isinstance(event, AgentMessageCompleteEvent):
             self.stop_live()
-            if self.full_response:
-                self.console.print(Markdown(self.full_response))
+            display_text = self.full_response if self.full_response else getattr(event, 'content', '')
+            if display_text:
+                self.console.print(Markdown(display_text))
             self.full_response = ''
             
         elif isinstance(event, AgentToolRequestEvent):
@@ -178,27 +184,9 @@ def main():
     renderer = CLIRenderer(console)
     agent.add_listener(renderer.handle_event)
     
-    # Fetch chat history
-    history = agent.get_history()
-    
-    if history:
-        console.print("[dim]Restoring previous session...[/dim]")
-        for event in history:
-            if isinstance(event, UserMessageEvent):
-                console.print(f"\n[bold green]You:[/bold green]\n{event.content}")
-                console.print("\n[bold blue]Assistant:[/bold blue]")
-            elif isinstance(event, AgentMessageCompleteEvent):
-                console.print(Markdown(event.content))
-            elif isinstance(event, AgentToolRequestEvent):
-                render_tool_request(console, event.tool_name, event.arguments)
-            elif isinstance(event, AgentToolApprovalRequestEvent):
-                render_tool_approval_request(console, event.tool_name, event.arguments, event.message)
-            elif isinstance(event, AgentToolResultEvent):
-                render_tool_result(console, event.tool_name, event.result)
-            elif isinstance(event, AgentToolErrorEvent):
-                render_tool_error(console, event.tool_name, event.error)
-            elif isinstance(event, AgentErrorEvent):
-                render_agent_error(console, event.error)
+    # Restore chat history organically via listener events
+    console.print("[dim]Restoring previous session...[/dim]")
+    agent.load()
                 
     session = PromptSession()
     

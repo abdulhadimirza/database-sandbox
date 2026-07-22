@@ -22,7 +22,9 @@ workflow.add_conditional_edges('agent', tools_condition)
 workflow.add_edge('tools', 'agent')
 
 # Implement SqliteSaver
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'checkpoints.db')
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+raw_db_path = os.getenv('CHECKPOINT_DB_PATH', 'checkpoints.db')
+DB_PATH = raw_db_path if os.path.isabs(raw_db_path) else os.path.abspath(os.path.join(PROJECT_ROOT, raw_db_path))
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 memory = SqliteSaver(conn)
 
