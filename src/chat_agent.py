@@ -30,6 +30,7 @@ class ChatEvent:
 @dataclass
 class UserMessageEvent(ChatEvent):
     content: str
+    is_history: bool = False
     event_type: str = field(default='user_message', init=False)
 
 @dataclass
@@ -122,7 +123,7 @@ class ChatAgent:
         
         for msg in messages:
             if isinstance(msg, HumanMessage):
-                self._emit(UserMessageEvent(content=msg.content))
+                self._emit(UserMessageEvent(content=msg.content, is_history=True))
             elif isinstance(msg, AIMessage):
                 text_content = ""
                 if isinstance(msg.content, str):

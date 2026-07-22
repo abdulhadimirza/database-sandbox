@@ -108,8 +108,9 @@ class CLIRenderer:
         self._debug(f"handle_event: {type(event).__name__}")
         if isinstance(event, UserMessageEvent):
             self.stop_live()
-            self.console.print(f"\n[bold green]You:[/bold green]\n{event.content}")
-            self.console.print("\n[bold blue]Assistant:[/bold blue]")
+            if event.is_history:
+                self.console.print(f"\n[bold green]You:[/bold green]\n{event.content}")
+                self.console.print("\n[bold blue]Assistant:[/bold blue]")
 
         elif isinstance(event, AgentThinkingEvent):
             self.start_live()
