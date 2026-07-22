@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Callable
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
 from langgraph.prebuilt import ToolCallTransformer
-from langgraph.errors import GraphRecursionError
+from langgraph.errors import GraphRecursionError, GraphInterrupt
+from langgraph.types import Command
 from langchain_core.runnables import RunnableConfig
 
 from agent import agent
@@ -61,6 +62,13 @@ class AgentToolErrorEvent(ChatEvent):
     event_type: str = field(default='agent_tool_error', init=False)
 
 @dataclass
+class AgentToolApprovalRequestEvent(ChatEvent):
+    tool_name: str
+    arguments: Dict[str, Any]
+    message: str
+    event_type: str = field(default='agent_tool_approval_request', init=False)
+
+@dataclass
 class AgentMessageStartEvent(ChatEvent):
     event_type: str = field(default='agent_message_start', init=False)
 
@@ -93,6 +101,7 @@ class ChatAgent:
         self.history: List[ChatEvent] = []
         self.config: RunnableConfig = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 50}
         self._listeners: List[Callable[[ChatEvent], None]] = []
+        self.is_paused: bool = False
         self._restore_history()
         
     def _restore_history(self) -> None:
@@ -179,27 +188,17 @@ class ChatAgent:
         Inject an error message into the agent's state so the LLM is aware of the failure on the next turn.
         """
         agent.update_state(self.config, {"messages": [("system", f"The previous agent turn failed with error: {error_msg}")]})
-            
-    def send_message(self, message: str) -> None:
-        """
-        Initiate sending a message. The agent's progress and response 
-        will be communicated entirely via event listeners.
-        """
-        self._emit(UserMessageEvent(content=message))
-        
-        input_state = {'messages': [{'role': 'user', 'content': message}]}
 
+    def _process_stream(self, stream) -> None:
+        """
+        Process the event stream returned by agent.stream_events.
+        """
+        self.is_paused = False
         active_tools: Dict[str, Dict[str, Any]] = {}
         current_msg_buffer = ''
+        pending_tool_errors: List[AgentToolErrorEvent] = []
         
         try:
-            stream = agent.stream_events(
-                input_state,
-                self.config,
-                version='v3',
-                transformers=[ToolCallTransformer]
-            )
-
             self._emit(AgentThinkingEvent())
             
             for event in stream:
@@ -248,12 +247,39 @@ class ChatAgent:
                             
                         self._emit(AgentThinkingEvent())
                     elif data['event'] == 'tool-error':
-                        tool_call_id = data['tool_call_id']
-                        active_tool = active_tools.pop(tool_call_id, {})
+                        tool_call_id = data.get('tool_call_id')
+                        active_tool = active_tools.pop(tool_call_id, {}) if tool_call_id else {}
                         t_name = active_tool.get('tool_name', 'Unknown')
                         t_input = active_tool.get('input', {})
-                        self._emit(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error="Tool Failed"))
-                        self._emit(AgentThinkingEvent())
+                        err_msg = str(data.get('message') or data.get('error') or "Tool Failed")
+                        pending_tool_errors.append(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error=err_msg))
+
+            if getattr(stream, 'interrupted', False):
+                self.is_paused = True
+                # Stream was interrupted for human approval; discard transient tool errors
+                pending_tool_errors.clear()
+                interrupts = getattr(stream, 'interrupts', [])
+                if interrupts:
+                    payload = interrupts[0].value
+                    if isinstance(payload, dict):
+                        t_name = payload.get("action", "execute_write_query")
+                        t_args = {"query": payload.get("query", "")}
+                        t_msg = payload.get("message", "Approval required.")
+                    else:
+                        t_name = "execute_write_query"
+                        t_args = {}
+                        t_msg = str(payload)
+                        
+                    self._emit(AgentToolApprovalRequestEvent(
+                        tool_name=t_name,
+                        arguments=t_args,
+                        message=t_msg
+                    ))
+            else:
+                # Stream completed without interruption; emit any real pending tool errors
+                for err_event in pending_tool_errors:
+                    self._emit(err_event)
+                    self._emit(AgentThinkingEvent())
         except GraphRecursionError as e:
             error_msg = f"Recursion limit reached: {str(e)}"
             self._emit(AgentErrorEvent(error=error_msg))
@@ -264,6 +290,56 @@ class ChatAgent:
             self._inject_error_to_agent_state(error_msg)
         finally:
             self._emit(AgentTurnCompleteEvent())
+
+    def send_message(self, message: str) -> None:
+        """
+        Initiate sending a message. The agent's progress and response 
+        will be communicated entirely via event listeners.
+        """
+        self._emit(UserMessageEvent(content=message))
+        
+        input_state = {'messages': [{'role': 'user', 'content': message}]}
+        
+        stream = agent.stream_events(
+            input_state,
+            self.config,
+            version='v3',
+            transformers=[ToolCallTransformer]
+        )
+        self._process_stream(stream)
+        
+    def resume_turn(self, resume_data: Any) -> None:
+        """
+        Resume execution after an interrupt with the provided human feedback.
+        """
+        stream = agent.stream_events(
+            Command(resume=resume_data),
+            self.config,
+            version='v3',
+            transformers=[ToolCallTransformer]
+        )
+        self._process_stream(stream)
+        
+    def approve(self) -> None:
+        """
+        Approve the pending action/tool execution.
+        """
+        self.resume_turn({"action": "approve"})
+
+    def reject(self) -> None:
+        """
+        Reject/cancel the pending action/tool execution.
+        """
+        self.resume_turn({"action": "reject"})
+
+    def respond_to_approval(self, approved: bool) -> None:
+        """
+        Respond to a pending tool approval request with a boolean decision.
+        """
+        if approved:
+            self.approve()
+        else:
+            self.reject()
         
     def get_history(self) -> List[ChatEvent]:
         """

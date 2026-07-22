@@ -1,5 +1,6 @@
 import time
 from langchain_core.tools import tool, ToolException
+from langgraph.types import interrupt
 
 import sys
 import os
@@ -174,6 +175,15 @@ def get_table_statistics(table: str) -> str:
 @tool()
 def execute_write_query(query: str) -> str:
     """Execute a raw SQL query that modifies the database (INSERT, UPDATE, DELETE, CREATE)."""
+    response = interrupt({
+        "action": "execute_write_query",
+        "query": query,
+        "message": f"Approve executing the following SQL write query?\n{query}"
+    })
+    
+    if not isinstance(response, dict) or response.get("action") != "approve":
+        return "Query execution cancelled by user."
+        
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()

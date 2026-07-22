@@ -21,6 +21,7 @@ from chat_agent import (
     AgentToolRequestEvent,
     AgentToolResultEvent,
     AgentToolErrorEvent,
+    AgentToolApprovalRequestEvent,
     AgentMessageStartEvent,
     AgentMessageChunkEvent,
     AgentMessageCompleteEvent,
@@ -42,6 +43,18 @@ def render_tool_request(console: Console, name: str, args: dict):
         f"[bold cyan]Tool Requested:[/bold cyan] {name}\n\n[bold green]Arguments:[/bold green]\n[dim]{args_str}[/dim]",
         title="* Tool Execution Requested",
         border_style='cyan'
+    ))
+
+def render_tool_approval_request(console: Console, name: str, args: dict, message: str):
+    try:
+        args_str = json.dumps(args, indent=2)
+    except Exception:
+        args_str = str(args)
+        
+    console.print(Panel(
+        f"[bold yellow]Approval Required for Tool:[/bold yellow] {name}\n\n[bold white]{message}[/bold white]\n\n[bold green]Arguments:[/bold green]\n[dim]{args_str}[/dim]\n\n[bold yellow]Type 'y' / 'yes' to approve, or anything else to cancel.[/bold yellow]",
+        title="! Action Paused - Human Approval Required",
+        border_style='yellow'
     ))
 
 def render_tool_result(console: Console, name: str, result: str):
@@ -129,6 +142,13 @@ class CLIRenderer:
             render_tool_request(self.console, event.tool_name, event.arguments)
             self.full_response = ''
             
+        elif isinstance(event, AgentToolApprovalRequestEvent):
+            self.stop_live()
+            if self.full_response:
+                self.console.print(Markdown(self.full_response))
+            render_tool_approval_request(self.console, event.tool_name, event.arguments, event.message)
+            self.full_response = ''
+
         elif isinstance(event, AgentToolResultEvent):
             self.stop_live()
             render_tool_result(self.console, event.tool_name, event.result)
@@ -171,6 +191,8 @@ def main():
                 console.print(Markdown(event.content))
             elif isinstance(event, AgentToolRequestEvent):
                 render_tool_request(console, event.tool_name, event.arguments)
+            elif isinstance(event, AgentToolApprovalRequestEvent):
+                render_tool_approval_request(console, event.tool_name, event.arguments, event.message)
             elif isinstance(event, AgentToolResultEvent):
                 render_tool_result(console, event.tool_name, event.result)
             elif isinstance(event, AgentToolErrorEvent):
@@ -192,11 +214,18 @@ def main():
         
     while True:
         try:
+            if agent.is_paused:
+                prompt_label = HTML("\n<ansiyellow><b>Approve execution? (y/n):</b></ansiyellow>\n")
+                toolbar_label = HTML("<b>Type 'y' or 'yes' to approve | Any other input to cancel/reject | /quit or /exit to exit</b>")
+            else:
+                prompt_label = HTML("\n<ansigreen><b>You:</b></ansigreen>\n")
+                toolbar_label = HTML("<b>[Enter] to send | [Esc] -> [Enter] for new line | /quit or /exit to exit</b>")
+                
             prompt = session.prompt(
-                HTML("\n<ansigreen><b>You:</b></ansigreen>\n"),
+                prompt_label,
                 multiline=True,
                 key_bindings=bindings,
-                bottom_toolbar=HTML("<b>[Enter] to send | [Esc] -> [Enter] for new line | /quit or /exit to exit</b>"),
+                bottom_toolbar=toolbar_label,
                 style=Style.from_dict({'bottom-toolbar': 'default'})
             )
             
@@ -208,7 +237,11 @@ def main():
             console.print("\n[bold blue]Assistant:[/bold blue]")
             
             renderer.full_response = ''
-            agent.send_message(prompt)
+            if agent.is_paused:
+                approved = prompt.strip().lower() in ['y', 'yes']
+                agent.respond_to_approval(approved)
+            else:
+                agent.send_message(prompt)
                 
         except (KeyboardInterrupt, EOFError):
             break
