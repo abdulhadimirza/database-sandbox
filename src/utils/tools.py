@@ -226,7 +226,22 @@ def analyze_query_impact(query: str) -> str:
                         except Exception:
                             row_count_info = "Estimated Affected Rows: Unknown (could not parse row count pre-check)"
                     elif stmt_upper.startswith("INSERT"):
-                        row_count_info = "Estimated Affected Rows: 1"
+                        try:
+                            if "VALUES" in stmt_upper:
+                                values_part = stmt[stmt_upper.find("VALUES") + 6 :].strip()
+                                tuple_matches = [t for t in values_part.split(")") if "(" in t]
+                                cnt = len(tuple_matches) if tuple_matches else 1
+                                row_count_info = f"Estimated Affected Rows: {cnt}"
+                            elif "SELECT" in stmt_upper:
+                                select_idx = stmt_upper.find("SELECT")
+                                count_sql = "SELECT COUNT(*) as cnt " + stmt[select_idx + 6 :]
+                                cursor.execute(count_sql)
+                                cnt = cursor.fetchone()["cnt"]
+                                row_count_info = f"Estimated Affected Rows: {cnt}"
+                            else:
+                                row_count_info = "Estimated Affected Rows: 1"
+                        except Exception:
+                            row_count_info = "Estimated Affected Rows: 1"
                     else:
                         row_count_info = "Estimated Affected Rows: N/A"
                         
@@ -255,7 +270,7 @@ def execute_write_query(query: str, explanation: str) -> str:
         "message": f"Approve executing the following SQL write query/queries?\n\nExplanation:\n{explanation}\n\nSQL:\n{query}"
     })
     
-    if not isinstance(response, dict) or response.get("action") != "approve":
+    if not response:
         return "Query execution cancelled by user."
         
     try:

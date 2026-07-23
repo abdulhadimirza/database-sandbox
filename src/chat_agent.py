@@ -167,6 +167,27 @@ class ChatAgent:
                         arguments=t_args,
                         result=msg.content
                     ))
+
+        # Check if the persisted graph state is suspended on a pending interrupt
+        if hasattr(state, 'tasks') and state.tasks:
+            for task in state.tasks:
+                if hasattr(task, 'interrupts') and task.interrupts:
+                    payload = task.interrupts[0].value
+                    if isinstance(payload, dict):
+                        t_name = payload.get("tool_name", "UnknownTool")
+                        t_args = payload.get("arguments", {})
+                        t_msg = payload.get("message", "Approval required.")
+                    else:
+                        t_name = "UnknownTool"
+                        t_args = {}
+                        t_msg = str(payload)
+                        
+                    self._emit(AgentToolApprovalRequestEvent(
+                        tool_name=t_name,
+                        arguments=t_args,
+                        message=t_msg
+                    ))
+                    break
     
     def add_listener(self, listener: Callable[[ChatEvent], None]) -> None:
         """
@@ -327,13 +348,13 @@ class ChatAgent:
         """
         Approve the pending action/tool execution.
         """
-        self.resume_turn({"action": "approve"})
+        self.resume_turn(True)
 
     def reject(self) -> None:
         """
         Reject/cancel the pending action/tool execution.
         """
-        self.resume_turn({"action": "reject"})
+        self.resume_turn(False)
 
     def respond_to_approval(self, approved: bool) -> None:
         """

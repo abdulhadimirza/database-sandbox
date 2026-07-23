@@ -46,18 +46,17 @@ def render_tool_request(console: Console, name: str, args: dict):
     ))
 
 def render_tool_approval_request(console: Console, name: str, args: dict, message: str):
-    explanation = args.get("explanation", None)
-    sql_query = args.get("query", None)
-    
-    body = [f"[bold yellow]Approval Required for Tool:[/bold yellow] {name}\n"]
-    if explanation:
-        body.append(f"[bold magenta]Impact Analysis / Blast Radius:[/bold magenta]\n{explanation}\n")
-    if sql_query:
-        body.append(f"[bold green]SQL Query:[/bold green]\n[dim]{sql_query}[/dim]\n")
-    else:
-        body.append(f"[bold white]{message}[/bold white]\n")
+    try:
+        args_str = json.dumps(args, indent=2)
+    except Exception:
+        args_str = str(args)
         
-    body.append("[bold yellow]Type 'y' / 'yes' to approve, or anything else to cancel.[/bold yellow]")
+    body = [
+        f"[bold yellow]Approval Required for Tool:[/bold yellow] {name}\n",
+        f"[bold white]{message}[/bold white]\n",
+        f"[bold green]Arguments:[/bold green]\n[dim]{args_str}[/dim]\n",
+        "[bold yellow]Type 'y' / 'yes' to approve, or anything else to cancel.[/bold yellow]"
+    ]
     
     console.print(Panel(
         "\n".join(body),
