@@ -173,9 +173,9 @@ def get_table_statistics(table: str) -> str:
 def execute_write_query(query: str) -> str:
     """Execute a raw SQL query that modifies the database (INSERT, UPDATE, DELETE, CREATE)."""
     response = interrupt({
-        "action": "execute_write_query",
-        "query": query,
-        "message": f"Approve executing the following SQL write query?\n{query}"
+        "tool_name": "execute_write_query",
+        "arguments": {"query": query},
+        "message": f"Approve executing the following SQL write query?\n\n{query}"
     })
     
     if not isinstance(response, dict) or response.get("action") != "approve":

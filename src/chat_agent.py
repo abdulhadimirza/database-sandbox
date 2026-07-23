@@ -265,11 +265,11 @@ class ChatAgent:
                 if interrupts:
                     payload = interrupts[0].value
                     if isinstance(payload, dict):
-                        t_name = payload.get("action", "execute_write_query")
-                        t_args = {"query": payload.get("query", "")}
+                        t_name = payload.get("tool_name", "UnknownTool")
+                        t_args = payload.get("arguments", {})
                         t_msg = payload.get("message", "Approval required.")
                     else:
-                        t_name = "execute_write_query"
+                        t_name = "UnknownTool"
                         t_args = {}
                         t_msg = str(payload)
                         
