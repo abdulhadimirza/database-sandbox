@@ -81,29 +81,34 @@ def create_timeout_handler(timeout_seconds: float):
 
 @tool()
 def execute_read_query(query: str) -> str:
-    """Safely execute a raw SQL query provided by the LLM and return the results."""
+    """Safely execute one or more raw SQL queries provided by the LLM (separated by semicolons) and return the results."""
+    statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+    if not statements:
+        return "No valid SQL statements found in input."
+
     try:
         with get_readonly_connection() as conn:
             conn.set_progress_handler(create_timeout_handler(2.0), 1000)
             cursor = conn.cursor()
             
-            cursor.execute(query)
-            # Fetch one extra row to detect if we hit the limit
-            rows = cursor.fetchmany(101)
-            
-            output_rows = rows[:100]
-            
-            if not output_rows:
-                return "Query executed successfully, but returned no rows."
+            results_output = []
+            for idx, stmt in enumerate(statements, 1):
+                cursor.execute(stmt)
+                rows = cursor.fetchmany(101)
+                output_rows = rows[:100]
                 
-            output = ["Query Results:"]
-            for row in output_rows:
-                output.append(str(dict(row)))
-                
-            if len(rows) > 100:
-                output.append("... Output truncated (100 rows maximum) ...")
-                
-            return "\n".join(output)
+                stmt_hdr = f"Results for Statement {idx} ('{stmt}'):" if len(statements) > 1 else "Query Results:"
+                if not output_rows:
+                    results_output.append(f"{stmt_hdr}\nQuery executed successfully, but returned no rows.")
+                else:
+                    lines = [stmt_hdr]
+                    for row in output_rows:
+                        lines.append(str(dict(row)))
+                    if len(rows) > 100:
+                        lines.append("... Output truncated (100 rows maximum) ...")
+                    results_output.append("\n".join(lines))
+                    
+            return "\n\n".join(results_output)
     except Exception as e:
         raise ToolException(f"Database Error: {e}")
 
@@ -171,66 +176,83 @@ def get_table_statistics(table: str) -> str:
 
 @tool()
 def analyze_query_impact(query: str) -> str:
-    """Analyze a proposed write query by generating its EXPLAIN QUERY PLAN and estimating the affected row count."""
+    """Analyze one or more proposed write queries (separated by semicolons) by generating EXPLAIN QUERY PLAN and estimating affected row counts for each statement."""
+    statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+    if not statements:
+        return "No valid SQL statements found in input."
+        
+    outputs = []
     try:
         with get_readonly_connection() as conn:
             cursor = conn.cursor()
             
-            # Get EXPLAIN QUERY PLAN
-            cursor.execute(f"EXPLAIN QUERY PLAN {query}")
-            plan_rows = cursor.fetchall()
-            
-            plan_output = ["Query Plan:"]
-            for row in plan_rows:
-                plan_output.append(f"  detail: {row['detail']}")
+            for idx, stmt in enumerate(statements, 1):
+                stmt_output = [f"Statement {idx}: {stmt}"] if len(statements) > 1 else [f"Query: {stmt}"]
                 
-            # Attempt to estimate affected row count for UPDATE/DELETE
-            query_upper = query.strip().upper()
-            row_count_info = ""
-            if query_upper.startswith("UPDATE") or query_upper.startswith("DELETE"):
+                has_error = False
+                # EXPLAIN QUERY PLAN
                 try:
-                    if query_upper.startswith("DELETE"):
-                        # DELETE FROM table WHERE ... -> SELECT COUNT(*) FROM table WHERE ...
-                        from_idx = query_upper.find("FROM")
-                        if from_idx != -1:
-                            count_sql = "SELECT COUNT(*) as cnt " + query[from_idx:]
-                        else:
-                            count_sql = ""
+                    cursor.execute(f"EXPLAIN QUERY PLAN {stmt}")
+                    plan_rows = cursor.fetchall()
+                    stmt_output.append("Query Plan:")
+                    for row in plan_rows:
+                        stmt_output.append(f"  detail: {row['detail']}")
+                except Exception as plan_err:
+                    has_error = True
+                    stmt_output.append(f"Query Plan Error: {plan_err}")
+                    
+                # Estimate row count only if query plan succeeded
+                if not has_error:
+                    stmt_upper = stmt.upper()
+                    row_count_info = ""
+                    if stmt_upper.startswith("UPDATE") or stmt_upper.startswith("DELETE"):
+                        try:
+                            if stmt_upper.startswith("DELETE"):
+                                from_idx = stmt_upper.find("FROM")
+                                count_sql = "SELECT COUNT(*) as cnt " + stmt[from_idx:] if from_idx != -1 else ""
+                            else:
+                                parts = stmt.split("SET", 1)
+                                table_part = parts[0].replace("UPDATE", "").strip()
+                                where_part = ""
+                                if "WHERE" in parts[1].upper():
+                                    where_idx = parts[1].upper().find("WHERE")
+                                    where_part = parts[1][where_idx:]
+                                count_sql = f"SELECT COUNT(*) as cnt FROM {table_part} {where_part}"
+                                
+                            if count_sql:
+                                cursor.execute(count_sql)
+                                cnt = cursor.fetchone()["cnt"]
+                                row_count_info = f"Estimated Affected Rows: {cnt}"
+                        except Exception:
+                            row_count_info = "Estimated Affected Rows: Unknown (could not parse row count pre-check)"
+                    elif stmt_upper.startswith("INSERT"):
+                        row_count_info = "Estimated Affected Rows: 1"
                     else:
-                        # UPDATE table SET ... WHERE ... -> SELECT COUNT(*) FROM table WHERE ...
-                        parts = query.split("SET", 1)
-                        table_part = parts[0].replace("UPDATE", "").strip()
-                        where_part = ""
-                        if "WHERE" in parts[1].upper():
-                            where_idx = parts[1].upper().find("WHERE")
-                            where_part = parts[1][where_idx:]
-                        count_sql = f"SELECT COUNT(*) as cnt FROM {table_part} {where_part}"
+                        row_count_info = "Estimated Affected Rows: N/A"
                         
-                    if count_sql:
-                        cursor.execute(count_sql)
-                        cnt = cursor.fetchone()["cnt"]
-                        row_count_info = f"Estimated Affected Rows: {cnt}"
-                except Exception:
-                    row_count_info = "Estimated Affected Rows: Unknown (could not parse query for row count pre-check)"
-            elif query_upper.startswith("INSERT"):
-                row_count_info = "Estimated Affected Rows: 1"
-            else:
-                row_count_info = "Estimated Affected Rows: N/A"
+                    if row_count_info:
+                        stmt_output.append(row_count_info)
+                else:
+                    stmt_output.append("Estimated Affected Rows: N/A (Invalid Query)")
+                    
+                outputs.append("\n".join(stmt_output))
+
                 
-            if row_count_info:
-                plan_output.append(row_count_info)
-                
-            return "\n".join(plan_output)
+            return "\n\n".join(outputs)
     except Exception as e:
         raise ToolException(f"Error analyzing query impact: {e}")
 
 @tool()
 def execute_write_query(query: str, explanation: str) -> str:
-    """Execute a raw SQL query that modifies the database. Requires a plain-English explanation of the blast radius / impact."""
+    """Execute one or more raw SQL queries that modify the database (separated by semicolons). Requires a plain-English explanation of the blast radius / impact."""
+    statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+    if not statements:
+        return "No valid SQL statements found in input."
+
     response = interrupt({
         "tool_name": "execute_write_query",
         "arguments": {"query": query, "explanation": explanation},
-        "message": f"Approve executing the following SQL write query?\n\nExplanation:\n{explanation}\n\nSQL:\n{query}"
+        "message": f"Approve executing the following SQL write query/queries?\n\nExplanation:\n{explanation}\n\nSQL:\n{query}"
     })
     
     if not isinstance(response, dict) or response.get("action") != "approve":
@@ -239,10 +261,13 @@ def execute_write_query(query: str, explanation: str) -> str:
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query)
+            total_rows_affected = 0
+            for stmt in statements:
+                cursor.execute(stmt)
+                total_rows_affected += cursor.rowcount if cursor.rowcount > 0 else 0
             conn.commit()
             
-            return f"Query executed successfully. Rows affected: {cursor.rowcount}"
+            return f"All {len(statements)} statement(s) executed successfully. Total rows affected: {total_rows_affected}"
     except Exception as e:
         raise ToolException(f"Database Error: {e}")
 
