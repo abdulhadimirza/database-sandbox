@@ -1,4 +1,6 @@
 import time
+import sqlglot
+from sqlglot import exp
 from langchain_core.tools import tool, ToolException
 from langgraph.types import interrupt
 
@@ -79,10 +81,21 @@ def create_timeout_handler(timeout_seconds: float):
         return 0
     return progress_handler
 
+def parse_sql_statements(query: str) -> list[str]:
+    """Parse raw SQL query string into individual SQL statements using sqlglot, falling back to semicolon split if parsing fails."""
+    try:
+        expressions = sqlglot.parse(query, read="sqlite")
+        statements = [expr.sql(dialect="sqlite") for expr in expressions if expr]
+        if statements:
+            return statements
+    except Exception:
+        pass
+    return [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+
 @tool()
 def execute_read_query(query: str) -> str:
     """Safely execute one or more raw SQL queries provided by the LLM (separated by semicolons) and return the results."""
-    statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+    statements = parse_sql_statements(query)
     if not statements:
         return "No valid SQL statements found in input."
 
@@ -177,8 +190,20 @@ def get_table_statistics(table: str) -> str:
 @tool()
 def analyze_query_impact(query: str) -> str:
     """Analyze one or more proposed write queries (separated by semicolons) by generating EXPLAIN QUERY PLAN and estimating affected row counts for each statement."""
-    statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
-    if not statements:
+    try:
+        parsed_expressions = sqlglot.parse(query, read="sqlite")
+    except Exception:
+        parsed_expressions = []
+
+    if not parsed_expressions:
+        statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+        if not statements:
+            return "No valid SQL statements found in input."
+        statements_to_process = [(stmt, None) for stmt in statements]
+    else:
+        statements_to_process = [(expr.sql(dialect="sqlite"), expr) for expr in parsed_expressions if expr]
+
+    if not statements_to_process:
         return "No valid SQL statements found in input."
         
     outputs = []
@@ -186,8 +211,8 @@ def analyze_query_impact(query: str) -> str:
         with get_readonly_connection() as conn:
             cursor = conn.cursor()
             
-            for idx, stmt in enumerate(statements, 1):
-                stmt_output = [f"Statement {idx}: {stmt}"] if len(statements) > 1 else [f"Query: {stmt}"]
+            for idx, (stmt, expr) in enumerate(statements_to_process, 1):
+                stmt_output = [f"Statement {idx}: {stmt}"] if len(statements_to_process) > 1 else [f"Query: {stmt}"]
                 
                 has_error = False
                 # EXPLAIN QUERY PLAN
@@ -203,47 +228,39 @@ def analyze_query_impact(query: str) -> str:
                     
                 # Estimate row count only if query plan succeeded
                 if not has_error:
-                    stmt_upper = stmt.upper()
                     row_count_info = ""
-                    if stmt_upper.startswith("UPDATE") or stmt_upper.startswith("DELETE"):
+                    if expr is not None:
                         try:
-                            if stmt_upper.startswith("DELETE"):
-                                from_idx = stmt_upper.find("FROM")
-                                count_sql = "SELECT COUNT(*) as cnt " + stmt[from_idx:] if from_idx != -1 else ""
-                            else:
-                                parts = stmt.split("SET", 1)
-                                table_part = parts[0].replace("UPDATE", "").strip()
-                                where_part = ""
-                                if "WHERE" in parts[1].upper():
-                                    where_idx = parts[1].upper().find("WHERE")
-                                    where_part = parts[1][where_idx:]
-                                count_sql = f"SELECT COUNT(*) as cnt FROM {table_part} {where_part}"
+                            if isinstance(expr, (exp.Update, exp.Delete)):
+                                table = expr.this
+                                where = expr.args.get("where")
+                                count_query = sqlglot.select("COUNT(*) as cnt").from_(table)
+                                if where:
+                                    count_query = count_query.where(where.this)
+                                count_sql = count_query.sql(dialect="sqlite")
                                 
-                            if count_sql:
                                 cursor.execute(count_sql)
                                 cnt = cursor.fetchone()["cnt"]
                                 row_count_info = f"Estimated Affected Rows: {cnt}"
+                            elif isinstance(expr, exp.Insert):
+                                expression_type = expr.args.get("expression")
+                                if isinstance(expression_type, exp.Values):
+                                    cnt = len(expression_type.expressions)
+                                    row_count_info = f"Estimated Affected Rows: {cnt}"
+                                elif isinstance(expression_type, exp.Select):
+                                    count_query = sqlglot.select("COUNT(*) as cnt").from_(expression_type.subquery("subq"))
+                                    count_sql = count_query.sql(dialect="sqlite")
+                                    cursor.execute(count_sql)
+                                    cnt = cursor.fetchone()["cnt"]
+                                    row_count_info = f"Estimated Affected Rows: {cnt}"
+                                else:
+                                    row_count_info = "Estimated Affected Rows: 1"
+                            else:
+                                row_count_info = "Estimated Affected Rows: N/A"
                         except Exception:
                             row_count_info = "Estimated Affected Rows: Unknown (could not parse row count pre-check)"
-                    elif stmt_upper.startswith("INSERT"):
-                        try:
-                            if "VALUES" in stmt_upper:
-                                values_part = stmt[stmt_upper.find("VALUES") + 6 :].strip()
-                                tuple_matches = [t for t in values_part.split(")") if "(" in t]
-                                cnt = len(tuple_matches) if tuple_matches else 1
-                                row_count_info = f"Estimated Affected Rows: {cnt}"
-                            elif "SELECT" in stmt_upper:
-                                select_idx = stmt_upper.find("SELECT")
-                                count_sql = "SELECT COUNT(*) as cnt " + stmt[select_idx + 6 :]
-                                cursor.execute(count_sql)
-                                cnt = cursor.fetchone()["cnt"]
-                                row_count_info = f"Estimated Affected Rows: {cnt}"
-                            else:
-                                row_count_info = "Estimated Affected Rows: 1"
-                        except Exception:
-                            row_count_info = "Estimated Affected Rows: 1"
                     else:
-                        row_count_info = "Estimated Affected Rows: N/A"
+                        row_count_info = "Estimated Affected Rows: Unknown (could not parse row count pre-check)"
                         
                     if row_count_info:
                         stmt_output.append(row_count_info)
@@ -251,7 +268,6 @@ def analyze_query_impact(query: str) -> str:
                     stmt_output.append("Estimated Affected Rows: N/A (Invalid Query)")
                     
                 outputs.append("\n".join(stmt_output))
-
                 
             return "\n\n".join(outputs)
     except Exception as e:
@@ -260,7 +276,7 @@ def analyze_query_impact(query: str) -> str:
 @tool()
 def execute_write_query(query: str, explanation: str) -> str:
     """Execute one or more raw SQL queries that modify the database (separated by semicolons). Requires a plain-English explanation of the blast radius / impact."""
-    statements = [stmt.strip() for stmt in query.split(";") if stmt.strip()]
+    statements = parse_sql_statements(query)
     if not statements:
         return "No valid SQL statements found in input."
 
