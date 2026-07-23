@@ -102,7 +102,6 @@ class ChatAgent:
         self.history: List[ChatEvent] = []
         self.config: RunnableConfig = {'configurable': {'thread_id': thread_id}, 'recursion_limit': 50}
         self._listeners: List[Callable[[ChatEvent], None]] = []
-        self.is_paused: bool = False
         
     def load(self) -> None:
         """
@@ -199,7 +198,6 @@ class ChatAgent:
         """
         Process the event stream returned by agent.stream_events.
         """
-        self.is_paused = False
         active_tools: Dict[str, Dict[str, Any]] = {}
         current_msg_buffer = ''
         pending_tool_errors: List[AgentToolErrorEvent] = []
@@ -261,7 +259,6 @@ class ChatAgent:
                         pending_tool_errors.append(AgentToolErrorEvent(tool_name=t_name, arguments=t_input, error=err_msg))
 
             if getattr(stream, 'interrupted', False):
-                self.is_paused = True
                 # Stream was interrupted for human approval; discard transient tool errors
                 pending_tool_errors.clear()
                 interrupts = getattr(stream, 'interrupts', [])

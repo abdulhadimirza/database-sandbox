@@ -83,6 +83,7 @@ class CLIRenderer:
         self.console = console
         self.live = None
         self.full_response = ''
+        self.awaiting_approval = False
 
     def _debug(self, msg):
         pass#print(msg)
@@ -155,6 +156,7 @@ class CLIRenderer:
                 self.console.print(Markdown(self.full_response))
             render_tool_approval_request(self.console, event.tool_name, event.arguments, event.message)
             self.full_response = ''
+            self.awaiting_approval = True
 
         elif isinstance(event, AgentToolResultEvent):
             self.stop_live()
@@ -203,7 +205,7 @@ def main():
         
     while True:
         try:
-            if agent.is_paused:
+            if renderer.awaiting_approval:
                 prompt_label = HTML("\n<ansiyellow><b>Approve execution? (y/n):</b></ansiyellow>\n")
                 toolbar_label = HTML("<b>Type 'y' or 'yes' to approve | Any other input to cancel/reject | /quit or /exit to exit</b>")
             else:
@@ -226,7 +228,8 @@ def main():
             console.print("\n[bold blue]Assistant:[/bold blue]")
             
             renderer.full_response = ''
-            if agent.is_paused:
+            if renderer.awaiting_approval:
+                renderer.awaiting_approval = False
                 approved = prompt.strip().lower() in ['y', 'yes']
                 agent.respond_to_approval(approved)
             else:
