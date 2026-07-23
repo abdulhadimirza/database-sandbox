@@ -170,12 +170,67 @@ def get_table_statistics(table: str) -> str:
         raise ToolException(f"Error getting statistics for '{table}': {e}")
 
 @tool()
-def execute_write_query(query: str) -> str:
-    """Execute a raw SQL query that modifies the database (INSERT, UPDATE, DELETE, CREATE)."""
+def analyze_query_impact(query: str) -> str:
+    """Analyze a proposed write query by generating its EXPLAIN QUERY PLAN and estimating the affected row count."""
+    try:
+        with get_readonly_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get EXPLAIN QUERY PLAN
+            cursor.execute(f"EXPLAIN QUERY PLAN {query}")
+            plan_rows = cursor.fetchall()
+            
+            plan_output = ["Query Plan:"]
+            for row in plan_rows:
+                plan_output.append(f"  detail: {row['detail']}")
+                
+            # Attempt to estimate affected row count for UPDATE/DELETE
+            query_upper = query.strip().upper()
+            row_count_info = ""
+            if query_upper.startswith("UPDATE") or query_upper.startswith("DELETE"):
+                try:
+                    if query_upper.startswith("DELETE"):
+                        # DELETE FROM table WHERE ... -> SELECT COUNT(*) FROM table WHERE ...
+                        from_idx = query_upper.find("FROM")
+                        if from_idx != -1:
+                            count_sql = "SELECT COUNT(*) as cnt " + query[from_idx:]
+                        else:
+                            count_sql = ""
+                    else:
+                        # UPDATE table SET ... WHERE ... -> SELECT COUNT(*) FROM table WHERE ...
+                        parts = query.split("SET", 1)
+                        table_part = parts[0].replace("UPDATE", "").strip()
+                        where_part = ""
+                        if "WHERE" in parts[1].upper():
+                            where_idx = parts[1].upper().find("WHERE")
+                            where_part = parts[1][where_idx:]
+                        count_sql = f"SELECT COUNT(*) as cnt FROM {table_part} {where_part}"
+                        
+                    if count_sql:
+                        cursor.execute(count_sql)
+                        cnt = cursor.fetchone()["cnt"]
+                        row_count_info = f"Estimated Affected Rows: {cnt}"
+                except Exception:
+                    row_count_info = "Estimated Affected Rows: Unknown (could not parse query for row count pre-check)"
+            elif query_upper.startswith("INSERT"):
+                row_count_info = "Estimated Affected Rows: 1"
+            else:
+                row_count_info = "Estimated Affected Rows: N/A"
+                
+            if row_count_info:
+                plan_output.append(row_count_info)
+                
+            return "\n".join(plan_output)
+    except Exception as e:
+        raise ToolException(f"Error analyzing query impact: {e}")
+
+@tool()
+def execute_write_query(query: str, explanation: str) -> str:
+    """Execute a raw SQL query that modifies the database. Requires a plain-English explanation of the blast radius / impact."""
     response = interrupt({
         "tool_name": "execute_write_query",
-        "arguments": {"query": query},
-        "message": f"Approve executing the following SQL write query?\n\n{query}"
+        "arguments": {"query": query, "explanation": explanation},
+        "message": f"Approve executing the following SQL write query?\n\nExplanation:\n{explanation}\n\nSQL:\n{query}"
     })
     
     if not isinstance(response, dict) or response.get("action") != "approve":
@@ -232,6 +287,7 @@ describe_table.handle_tool_error = True
 execute_read_query.handle_tool_error = True
 get_column_distinct_values.handle_tool_error = True
 get_table_statistics.handle_tool_error = True
+analyze_query_impact.handle_tool_error = True
 execute_write_query.handle_tool_error = True
 search_tables_by_keyword.handle_tool_error = True
 
@@ -241,6 +297,8 @@ tools = [
     execute_read_query,
     get_column_distinct_values,
     get_table_statistics,
+    analyze_query_impact,
     execute_write_query,
     search_tables_by_keyword
 ]
+
