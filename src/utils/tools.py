@@ -6,7 +6,6 @@ from langgraph.types import interrupt
 
 from database import get_readonly_connection, get_db_connection
 from .mock_tools import generate_mock_records, batch_insert_mock_data
-from .handoff_tools import transfer_to_data_editor, transfer_to_sample_generator, return_to_database_assistant
 
 @tool()
 def list_tables() -> str:
@@ -355,15 +354,12 @@ assistant_tools = [
     execute_read_query,
     get_column_distinct_values,
     get_table_statistics,
-    search_tables_by_keyword,
-    transfer_to_data_editor,
-    transfer_to_sample_generator
+    search_tables_by_keyword
 ]
 
 editor_tools = [
     analyze_query_impact,
-    execute_write_query,
-    return_to_database_assistant
+    execute_write_query
 ]
 
 generator_tools = [
@@ -371,8 +367,7 @@ generator_tools = [
     list_tables,
     execute_read_query,
     generate_mock_records,
-    batch_insert_mock_data,
-    return_to_database_assistant
+    batch_insert_mock_data
 ]
 
 tools = [
@@ -385,9 +380,7 @@ tools = [
     execute_write_query,
     search_tables_by_keyword,
     generate_mock_records,
-    batch_insert_mock_data,
-    transfer_to_data_editor,
-    transfer_to_sample_generator,
-    return_to_database_assistant
+    batch_insert_mock_data
 ]
+
 

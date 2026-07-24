@@ -38,13 +38,11 @@ def create_agent_node(system_prompt: str, node_tools: list):
     fallback = deepseek.bind_tools(node_tools)
     
     # Define the actual LangGraph node function
-    def node(state: AgentState):
+    def node(state):
         global _rate_limit_reset_time
         
-        # Keep recent message context to avoid exceeding model token limits
-        #recent_messages = state.messages[-25:] if len(state.messages) > 25 else state.messages
-        #messages = [SystemMessage(content=system_prompt)] + recent_messages
-        messages = [SystemMessage(content=system_prompt)] + state.messages
+        state_messages = state.get("messages", []) if isinstance(state, dict) else state.messages
+        messages = [SystemMessage(content=system_prompt)] + list(state_messages)
 
         current_time = time.time()
         
