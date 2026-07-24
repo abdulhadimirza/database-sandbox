@@ -1,25 +1,55 @@
 import os
 import sqlite3
-from langgraph.graph import StateGraph, START
+from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from utils.state import AgentState
-from utils.tools import tools
+from utils.tools import assistant_tools, editor_tools, generator_tools
 from utils.nodes import create_agent_node
-from utils.prompts import system_prompt
+from utils.prompts import assistant_system_prompt, editor_system_prompt, generator_system_prompt
 
-call_model = create_agent_node(system_prompt=system_prompt, node_tools=tools)
+# Create agent nodes
+database_assistant_node = create_agent_node(system_prompt=assistant_system_prompt, node_tools=assistant_tools)
+data_editor_node = create_agent_node(system_prompt=editor_system_prompt, node_tools=editor_tools)
+sample_generator_node = create_agent_node(system_prompt=generator_system_prompt, node_tools=generator_tools)
 
-# Create the native LangGraph StateGraph
+# Create the multi-agent LangGraph StateGraph
 workflow = StateGraph(AgentState)
 
-workflow.add_node('agent', call_model)
-workflow.add_node('tools', ToolNode(tools))
+# Add Agent and Tool nodes
+workflow.add_node('database_assistant_agent', database_assistant_node)
+workflow.add_node('assistant_tools', ToolNode(assistant_tools))
 
-workflow.add_edge(START, 'agent')
-workflow.add_conditional_edges('agent', tools_condition)
-workflow.add_edge('tools', 'agent')
+workflow.add_node('data_editor_agent', data_editor_node)
+workflow.add_node('editor_tools', ToolNode(editor_tools))
+
+workflow.add_node('sample_generator_agent', sample_generator_node)
+workflow.add_node('generator_tools', ToolNode(generator_tools))
+
+# Add edges and conditional routing
+workflow.add_edge(START, 'database_assistant_agent')
+
+workflow.add_conditional_edges(
+    'database_assistant_agent', 
+    tools_condition,
+    {'tools': 'assistant_tools', END: END}
+)
+workflow.add_edge('assistant_tools', 'database_assistant_agent')
+
+workflow.add_conditional_edges(
+    'data_editor_agent', 
+    tools_condition,
+    {'tools': 'editor_tools', END: END}
+)
+workflow.add_edge('editor_tools', 'data_editor_agent')
+
+workflow.add_conditional_edges(
+    'sample_generator_agent', 
+    tools_condition,
+    {'tools': 'generator_tools', END: END}
+)
+workflow.add_edge('generator_tools', 'sample_generator_agent')
 
 # Implement SqliteSaver
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

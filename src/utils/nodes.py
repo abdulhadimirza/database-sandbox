@@ -8,7 +8,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from .state import AgentState
 
 deepseek = ChatDeepSeek(
-    model=os.environ.get('DEEPSEEK_MODEL'),
+    api_key=os.environ.get('DEEPSEEK_API_KEY') or 'dummy-key',
+    model=os.environ.get('DEEPSEEK_MODEL') or 'deepseek-v4-flash',
     reasoning_effort='low',
     temperature=1.0,
     max_retries=2,
@@ -20,11 +21,14 @@ deepseek = ChatDeepSeek(
 )
 
 gemini = ChatGoogleGenerativeAI(
-    model=os.environ.get('GEMINI_MODEL'),
+    api_key=os.environ.get('GEMINI_API_KEY') or 'dummy-key',
+    model=os.environ.get('GEMINI_MODEL') or 'gemini-flash-lite-latest',
     thinking_level='low',
     temperature=1.0,
     max_retries=2,
 )
+
+
 
 _rate_limit_reset_time = 0.0
 
@@ -37,6 +41,9 @@ def create_agent_node(system_prompt: str, node_tools: list):
     def node(state: AgentState):
         global _rate_limit_reset_time
         
+        # Keep recent message context to avoid exceeding model token limits
+        #recent_messages = state.messages[-25:] if len(state.messages) > 25 else state.messages
+        #messages = [SystemMessage(content=system_prompt)] + recent_messages
         messages = [SystemMessage(content=system_prompt)] + state.messages
 
         current_time = time.time()
@@ -63,3 +70,4 @@ def create_agent_node(system_prompt: str, node_tools: list):
         return {"messages": [response]}
         
     return node
+

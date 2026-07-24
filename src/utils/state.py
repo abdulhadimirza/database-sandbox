@@ -5,6 +5,5 @@ from langgraph.graph.message import add_messages
 
 class AgentState(BaseModel):
     messages: Annotated[List[AnyMessage], add_messages]
-    current_schema: Optional[str] = None
-    active_query: Optional[str] = None
-    errors: Optional[List[str]] = None
+    current_agent: Optional[str] = None
+

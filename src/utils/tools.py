@@ -5,6 +5,8 @@ from langchain_core.tools import tool, ToolException
 from langgraph.types import interrupt
 
 from database import get_readonly_connection, get_db_connection
+from .mock_tools import generate_mock_records, batch_insert_mock_data
+from .handoff_tools import transfer_to_data_editor, transfer_to_sample_generator, return_to_database_assistant
 
 @tool()
 def list_tables() -> str:
@@ -347,6 +349,32 @@ analyze_query_impact.handle_tool_error = True
 execute_write_query.handle_tool_error = True
 search_tables_by_keyword.handle_tool_error = True
 
+assistant_tools = [
+    list_tables, 
+    describe_table, 
+    execute_read_query,
+    get_column_distinct_values,
+    get_table_statistics,
+    search_tables_by_keyword,
+    transfer_to_data_editor,
+    transfer_to_sample_generator
+]
+
+editor_tools = [
+    analyze_query_impact,
+    execute_write_query,
+    return_to_database_assistant
+]
+
+generator_tools = [
+    describe_table,
+    list_tables,
+    execute_read_query,
+    generate_mock_records,
+    batch_insert_mock_data,
+    return_to_database_assistant
+]
+
 tools = [
     list_tables, 
     describe_table, 
@@ -355,6 +383,11 @@ tools = [
     get_table_statistics,
     analyze_query_impact,
     execute_write_query,
-    search_tables_by_keyword
+    search_tables_by_keyword,
+    generate_mock_records,
+    batch_insert_mock_data,
+    transfer_to_data_editor,
+    transfer_to_sample_generator,
+    return_to_database_assistant
 ]
 
